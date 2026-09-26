@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "backend/.venv/Scripts/fastapi.exe",
+      "runtimeArgs": ["dev", "backend/app/main.py", "--port", "8001"],
+      "port": 8001,
+      "autoPort": false
+    }
+  ]
+}
