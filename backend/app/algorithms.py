@@ -86,3 +86,33 @@ def apply_format(exercises: list[PlannedExercise], format: Format) -> list[Plann
                                       reps=exercise.reps))
 
     return result
+
+
+def rest_seconds(focus: str, is_isolation: bool) -> int:
+    """Automatic rest timer after a validated set (SPEC §4.2)."""
+    if is_isolation:
+        return 60
+    if focus == "Force":
+        return 150
+    return 90
+
+
+@dataclass(frozen=True)
+class LoggedSet:
+    """One set as logged at the gym. weight/reps stay None until typed in."""
+    weight: float | None
+    reps: int | None
+    done: bool
+
+
+def tonnage(sets: list[LoggedSet]) -> float:
+    """Total weight lifted in a workout: weight × reps, added up (SPEC §4.2 recap).
+
+    Only validated sets count. A set with no weight or no reps
+    (e.g. a bodyweight exercise) counts for 0.
+    """
+    total = 0
+    for s in sets:
+        if s.done and s.weight is not None and s.reps is not None:
+            total += s.weight * s.reps
+    return total

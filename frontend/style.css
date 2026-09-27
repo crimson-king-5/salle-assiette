@@ -208,3 +208,184 @@ button.ghost {
 @media (prefers-reduced-motion: no-preference) {
   button { transition: background 0.15s, border-color 0.15s; }
 }
+
+
+/* --- Workout mode (SPEC §4.2): usable one-handed, targets ≥ 52 px --- */
+
+.workout { padding-bottom: 120px; }  /* room for the rest timer bar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.topbar strong { font-family: "Barlow Condensed", sans-serif; font-size: 1.3rem; }
+
+button.small { width: auto; margin: 0; padding: 0 12px; }
+
+.chrono {
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 600;
+  font-size: 1.3rem;
+  min-width: 4ch;
+  text-align: right;
+}
+
+.segments { display: flex; gap: 4px; margin-bottom: 20px; }
+
+.segments button {
+  flex: 1;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.segments button span {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+}
+
+.segments button.done span { background: var(--go); }
+.segments button.current span { background: var(--accent); }
+
+.workout h2 { font-size: 2rem; }
+
+.set-row {
+  display: grid;
+  grid-template-columns: 1.5em 1fr 1fr 96px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.set-num {
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--muted);
+}
+
+.set-row label { position: relative; }
+
+.set-row input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 38px 0 12px;
+  font: 600 1.4rem "Barlow Condensed", sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.set-row input::placeholder { color: var(--muted); opacity: 0.6; }
+
+.set-row small {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.set-row .check {
+  min-height: 52px;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+
+.set-row.done .check { background: var(--go); font-size: 1.4rem; }
+.set-row.done input { border-color: var(--go); }
+
+.nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.nav button { min-height: 52px; font-weight: 600; }
+.nav .primary { margin: 0; }
+.nav button:disabled { opacity: 0.4; }
+
+.rest {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 3px solid var(--accent);
+}
+
+.rest[hidden] { display: none; }
+.rest-label { color: var(--muted); }
+
+.rest strong {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 2rem;
+  min-width: 3.2ch;
+}
+
+.rest button { padding: 0 10px; font-weight: 600; }
+
+/* In-app dialog */
+dialog {
+  width: min(92vw, 420px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 20px 16px 16px;
+  text-align: center;
+}
+
+dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.dialog-actions button { flex: 1; font-weight: 600; margin: 0; }
+.dialog-actions .danger { background: var(--stop); color: #fff; border: none; }
+
+.big-emoji { font-size: 3rem; margin: 0; }
+
+.recap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.recap div {
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.recap dt { color: var(--muted); font-size: 0.85rem; }
+
+.recap dd {
+  margin: 0;
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-size: 1.6rem;
+}

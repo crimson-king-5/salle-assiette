@@ -13,11 +13,18 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
+  <main id="today">
     <header>
       <p class="date" id="date"></p>
       <h1>Salut Karim</h1>
     </header>
+
+    <!-- A workout was left in progress: offer to resume it -->
+    <section id="resume" class="card hero" data-level="vert" hidden>
+      <p class="level">⏸ Séance en cours</p>
+      <h2 id="resume-name"></h2>
+      <button type="button" id="resume-btn" class="primary">Reprendre</button>
+    </section>
 
     <!-- Morning check-in: 4 emoji questions + available time -->
     <section id="checkin" class="card" hidden>
@@ -42,11 +49,48 @@
       <p class="label">Séance</p>
       <div class="sessions" id="sessions"></div>
       <ol class="exercises" id="exercises"></ol>
+      <button type="button" id="start" class="primary">Commencer</button>
       <button type="button" id="redo" class="ghost">Refaire le check-in</button>
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
   </main>
+
+  <!-- Workout mode: full screen, one exercise at a time (SPEC §4.2) -->
+  <main id="workout" class="workout" hidden>
+    <div class="topbar">
+      <button type="button" id="quit" class="ghost small">Quitter</button>
+      <strong id="w-name"></strong>
+      <span id="chrono" class="chrono">0:00</span>
+    </div>
+    <div id="segments" class="segments"></div>
+
+    <h2 id="ex-name"></h2>
+    <p id="ex-info" class="muted"></p>
+    <div id="sets"></div>
+
+    <div class="nav">
+      <button type="button" id="prev">Précédent</button>
+      <button type="button" id="next" class="primary">Suivant</button>
+    </div>
+    <button type="button" id="abandon" class="ghost">Abandonner la séance</button>
+
+    <div id="rest" class="rest" hidden>
+      <span class="rest-label">Repos</span>
+      <strong id="rest-time">1:30</strong>
+      <button type="button" id="rest-minus">−15 s</button>
+      <button type="button" id="rest-plus">+15 s</button>
+      <button type="button" id="rest-skip">Passer</button>
+    </div>
+  </main>
+
+  <!-- In-app dialog: never confirm()/alert(), they're blocked in some frames (SPEC §8) -->
+  <dialog id="dialog">
+    <div id="dialog-body"></div>
+    <div id="dialog-actions" class="dialog-actions"></div>
+  </dialog>
+
+  <script src="workout.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

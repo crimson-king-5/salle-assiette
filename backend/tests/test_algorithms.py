@@ -1,6 +1,6 @@
 import pytest
 
-from app.algorithms import PlannedExercise, apply_format, compute_readiness
+from app.algorithms import LoggedSet, PlannedExercise, apply_format, compute_readiness, tonnage
 
 
 def test_great_day_with_time_is_complete():
@@ -92,3 +92,29 @@ def test_session_shorter_than_format_is_fine():
 def test_original_program_is_not_modified():
     apply_format(HAUT_A, "express")
     assert HAUT_A[0].sets == 4  # the saved program must keep its 4 sets
+
+
+# --- tonnage (SPEC §4.2, end-of-workout recap) ---
+
+def test_tonnage_of_no_sets_is_zero():
+    assert tonnage([]) == 0
+
+
+def test_tonnage_adds_weight_times_reps():
+    sets = [LoggedSet(80, 6, True), LoggedSet(80, 5, True)]
+    assert tonnage(sets) == 80 * 6 + 80 * 5  # 880
+
+
+def test_tonnage_ignores_sets_not_validated():
+    sets = [LoggedSet(80, 6, True), LoggedSet(100, 6, False)]
+    assert tonnage(sets) == 480
+
+
+def test_tonnage_ignores_sets_without_weight_or_reps():
+    # bodyweight exercise (no weight), or a set validated before typing reps
+    sets = [LoggedSet(None, 12, True), LoggedSet(60, None, True), LoggedSet(60, 10, True)]
+    assert tonnage(sets) == 600
+
+
+def test_tonnage_handles_half_kilos():
+    assert tonnage([LoggedSet(22.5, 10, True)]) == 225

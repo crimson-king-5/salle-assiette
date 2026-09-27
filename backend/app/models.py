@@ -5,6 +5,7 @@ import datetime as dt
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.algorithms import PlannedExercise
 from app.database import Base
 
 
@@ -46,6 +47,58 @@ class SessionExercise(Base):
     reps: Mapped[str] = mapped_column(String(20))  # a range like "5-6", so text
 
     exercise: Mapped[Exercise] = relationship()
+
+
+def to_planned(template: SessionTemplate) -> list[PlannedExercise]:
+    """DB rows → the plain PlannedExercise objects used by the algorithms."""
+    return [
+        PlannedExercise(slug=se.exercise_slug, name=se.exercise.name_fr, sets=se.sets, reps=se.reps)
+        for se in template.exercises
+    ]
+
+
+class Workout(Base):
+    """A workout actually done (or in progress) at the gym (SPEC §3.2 workout)."""
+    __tablename__ = "workout"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(20))  # which template it came from
+    name: Mapped[str] = mapped_column(String(80))         # copied: history survives template edits
+    focus: Mapped[str] = mapped_column(String(20))
+    format: Mapped[str] = mapped_column(String(10))
+    date: Mapped[dt.date] = mapped_column(index=True)
+    started_at: Mapped[dt.datetime]
+    finished_at: Mapped[dt.datetime | None]  # None while the workout is in progress
+
+    exercises: Mapped[list["WorkoutExercise"]] = relationship(
+        order_by="WorkoutExercise.position", cascade="all, delete-orphan"
+    )
+
+
+class WorkoutExercise(Base):
+    __tablename__ = "workout_exercise"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("workout.id"))
+    position: Mapped[int]
+    exercise_slug: Mapped[str] = mapped_column(ForeignKey("exercise.slug"))
+    target_reps: Mapped[str] = mapped_column(String(20))
+
+    exercise: Mapped[Exercise] = relationship()
+    sets: Mapped[list["WorkoutSet"]] = relationship(
+        order_by="WorkoutSet.position", cascade="all, delete-orphan"
+    )
+
+
+class WorkoutSet(Base):
+    __tablename__ = "workout_set"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workout_exercise_id: Mapped[int] = mapped_column(ForeignKey("workout_exercise.id"))
+    position: Mapped[int]
+    weight: Mapped[float | None]  # kg; None until typed in
+    reps: Mapped[int | None]
+    done: Mapped[bool] = mapped_column(default=False)
 
 
 class Checkin(Base):

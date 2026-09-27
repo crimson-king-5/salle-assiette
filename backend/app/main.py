@@ -7,11 +7,12 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
-from app.algorithms import Format, PlannedExercise, apply_format, compute_readiness
+from app.algorithms import Format, apply_format, compute_readiness
 from app.database import Base, DbSession, SessionLocal, engine
-from app.models import Checkin, SessionTemplate
+from app.models import Checkin, SessionTemplate, Workout, to_planned
 from app.schemas import CheckinIn, CheckinOut, SessionOut
 from app.seed import seed_default_program
+from app.workouts import router as workouts_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Salle & Assiette", lifespan=lifespan)
+app.include_router(workouts_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -80,14 +82,6 @@ def get_today_checkin(db: DbSession) -> CheckinOut:
     return CheckinOut(score=row.score, level=row.level, format=row.format)
 
 
-def to_planned(template: SessionTemplate) -> list[PlannedExercise]:
-    """DB rows → the plain PlannedExercise objects used by the algorithms."""
-    return [
-        PlannedExercise(slug=se.exercise_slug, name=se.exercise.name_fr, sets=se.sets, reps=se.reps)
-        for se in template.exercises
-    ]
-
-
 @app.get("/sessions")
 def list_sessions(db: DbSession) -> list[SessionOut]:
     """Every session of the rotation, in order, with all their exercises."""
@@ -98,6 +92,21 @@ def list_sessions(db: DbSession) -> list[SessionOut]:
     ]
 
 
+@app.get("/sessions/next")
+def get_next_session_id(db: DbSession) -> dict:
+    """Next session of the rotation: the one after the last finished workout."""
+    rotation = db.scalars(select(SessionTemplate.id).order_by(SessionTemplate.position)).all()
+    last = db.scalars(
+        select(Workout.session_id)
+        .where(Workout.finished_at.is_not(None))
+        .order_by(Workout.finished_at.desc())
+    ).first()
+    if last not in rotation:  # no workout yet, or its session was deleted
+        return {"id": rotation[0]}
+    return {"id": rotation[(rotation.index(last) + 1) % len(rotation)]}
+
+
+# Declared after /sessions/next, otherwise "next" would be read as a session id
 @app.get("/sessions/{session_id}")
 def get_session(session_id: str, db: DbSession, format: Format = "complete") -> SessionOut:
     """One session, shortened to the requested format (e.g. ?format=express)."""

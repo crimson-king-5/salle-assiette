@@ -14,11 +14,12 @@ const LEVEL_TEXT = { vert: "🟢 Feu vert", orange: "🟠 Feu orange", rouge: "�
 const answers = {};       // filled as buttons are tapped: { energy: 5, sleep: 3, … }
 let todayFormat = null;   // "complete" | "minimale" | "express"
 let sessions = [];        // the rotation, loaded once from GET /sessions
+let selectedSession = null;  // id of the session chosen on the hero card
 
 const $ = (id) => document.getElementById(id);
 
 
-// Turn a format into the sentence shown on the hero card.
+
 function formatLabel(format) {
   if (format === "complete") {
     return "Séance complète · ≈ 60 min";
@@ -40,7 +41,7 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (response.status === 404) return null;
+  if (response.status === 404 || response.status === 204) return null;
   if (!response.ok) throw new Error(`Erreur serveur (${response.status})`);
   return response.json();
 }
@@ -111,10 +112,12 @@ async function showResult(result) {
 
   $("checkin").hidden = true;
   $("result").hidden = false;
-  await selectSession(sessions[0].id); // no workout history yet: start of the rotation
+  const next = await api("/sessions/next");  // the one after the last workout done
+  await selectSession(next.id);
 }
 
 async function selectSession(id) {
+  selectedSession = id;
   document.querySelectorAll("#sessions button").forEach((b) => {
     b.classList.toggle("selected", b.dataset.id === id);
   });
@@ -139,8 +142,24 @@ async function start() {
     const button = event.target.closest("button");
     if (button) selectSession(button.dataset.id).catch(showError);
   });
+  $("start").addEventListener("click", () => startWorkout(selectedSession));
+  $("resume-btn").addEventListener("click", () => resumeWorkout().catch(showError));
+  setupWorkout();
+  await showToday();
+}
 
+async function showToday() {
+  $("error").hidden = true;
   try {
+    // A workout left in progress comes first: "Reprendre"
+    const inProgress = await api("/workouts/current");
+    $("resume").hidden = !inProgress;
+    if (inProgress) {
+      $("resume-name").textContent = inProgress.name;
+      $("checkin").hidden = true;
+      $("result").hidden = true;
+      return;
+    }
     const today = await api("/checkin/today");
     if (today) await showResult(today);
     else showCheckin();
