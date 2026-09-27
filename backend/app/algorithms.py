@@ -23,6 +23,15 @@ class Readiness:
     format: Format
 
 
+@dataclass(frozen=True)  # frozen: can't be modified after creation
+class PlannedExercise:
+    """One line of a session plan, e.g. Squat — 4 sets of 5-6 reps."""
+    slug: str
+    name: str
+    sets: int
+    reps: str
+
+
 def compute_readiness(
     energy: int, sleep: int, motivation: int, soreness: int, minutes: int
 ) -> Readiness:
@@ -51,3 +60,29 @@ def compute_readiness(
         format = "minimale"
 
     return Readiness(score, level, format)
+
+
+def apply_format(exercises: list[PlannedExercise], format: Format) -> list[PlannedExercise]:
+    """Shorten a session to the day's format (SPEC §5.2).
+
+    complete → every exercise, unchanged
+    minimale → first 3 exercises, max 3 sets each
+    express  → first 2 exercises, max 3 sets each
+    """
+    if format == "complete":
+        return exercises
+    elif format == "minimale":
+        count = 3
+    else:
+        count = 2
+
+    kept = exercises[:count]
+
+    result = []
+    for exercise in kept:
+        result.append(PlannedExercise(slug=exercise.slug,
+                                      name=exercise.name,
+                                      sets=min(exercise.sets, 3),
+                                      reps=exercise.reps))
+
+    return result

@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.algorithms import PlannedExercise
+
 Answer = Literal[1, 3, 5]  # the 3 emoji buttons of each check-in question
 
 
@@ -26,3 +28,11 @@ class CheckinOut(BaseModel):
     score: int
     level: Literal["vert", "orange", "rouge"]
     format: Literal["complete", "minimale", "express"]
+
+
+class SessionOut(BaseModel):
+    """A session of the rotation with its exercises (possibly shortened)."""
+    id: str
+    name: str
+    focus: str
+    exercises: list[PlannedExercise]

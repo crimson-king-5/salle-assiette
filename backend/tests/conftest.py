@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
+from app.seed import seed_default_program
 
 
 @pytest.fixture
@@ -22,6 +23,7 @@ def db():
     )
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
+    seed_default_program(session)
     yield session
     session.close()
 
