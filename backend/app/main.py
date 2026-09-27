@@ -1,8 +1,10 @@
 import datetime as dt
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.algorithms import Format, PlannedExercise, apply_format, compute_readiness
@@ -10,6 +12,8 @@ from app.database import Base, DbSession, SessionLocal, engine
 from app.models import Checkin, SessionTemplate
 from app.schemas import CheckinIn, CheckinOut, SessionOut
 from app.seed import seed_default_program
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
 
 @asynccontextmanager
@@ -27,8 +31,7 @@ app = FastAPI(title="Salle & Assiette", lifespan=lifespan)
 
 @app.get("/", include_in_schema=False)
 def home() -> RedirectResponse:
-    # No frontend yet: send visitors to the interactive API docs.
-    return RedirectResponse("/docs")
+    return RedirectResponse("/app/")
 
 
 @app.get("/health")
@@ -103,3 +106,8 @@ def get_session(session_id: str, db: DbSession, format: Format = "complete") -> 
         raise HTTPException(status_code=404, detail="Séance inconnue")
     exercises = apply_format(to_planned(template), format)
     return SessionOut(id=template.id, name=template.name, focus=template.focus, exercises=exercises)
+
+
+# The phone app (PWA): HTML/CSS/JS files served as-is under /app/.
+# Mounted last so it never hides an API route.
+app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="app")

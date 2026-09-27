@@ -10,6 +10,17 @@ def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
 
 
+def test_phone_app_is_served(client):
+    response = client.get("/app/")
+    assert response.status_code == 200
+    assert "Check-in du jour" in response.text
+
+
+def test_root_redirects_to_phone_app(client):
+    response = client.get("/", follow_redirects=False)
+    assert response.headers["location"] == "/app/"
+
+
 def test_checkin_returns_readiness(client):
     response = client.post("/checkin", json=GREAT_DAY)
     assert response.status_code == 200

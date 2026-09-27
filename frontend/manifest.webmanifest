@@ -1,0 +1,13 @@
+{
+  "name": "Salle & Assiette",
+  "short_name": "Salle",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#16202B",
+  "theme_color": "#16202B",
+  "lang": "fr",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,210 @@
+/* Design tokens from SPEC §8 */
+:root {
+  --bg: #E6EAEE;
+  --surface: #F8F9FB;
+  --ink: #17222D;
+  --muted: #586675;
+  --line: #CAD2DB;
+  --accent: #2B54D6;
+  --go: #2E8B57;
+  --warn: #B97C0C;
+  --stop: #C23F38;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16202B;
+    --surface: #1F2B38;
+    --ink: #E7ECF1;
+    --muted: #9AA8B6;
+    --line: #324252;
+    --accent: #7393F5;
+    --go: #4DB27A;
+    --warn: #E3AE45;
+    --stop: #E06A62;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #16202B;
+  --surface: #1F2B38;
+  --ink: #E7ECF1;
+  --muted: #9AA8B6;
+  --line: #324252;
+  --accent: #7393F5;
+  --go: #4DB27A;
+  --warn: #E3AE45;
+  --stop: #E06A62;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Figtree", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+main {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+h1, h2, .level {
+  font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+h1 { font-size: 2.2rem; }
+h2 { font-size: 1.7rem; margin-bottom: 4px; }
+
+.date {
+  margin: 0;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+header { margin-bottom: 20px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 16px;
+}
+
+.muted { color: var(--muted); margin: 0 0 12px; }
+
+.label {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Check-in answer buttons: big and thumb-friendly (≥ 46 px) */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  min-height: 46px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.choices button { font-size: 1.6rem; min-height: 56px; }
+.choices[data-field="minutes"] button { font-size: 1rem; font-weight: 600; }
+
+.choices button.selected {
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+button.primary {
+  width: 100%;
+  margin-top: 20px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  font-size: 1.05rem;
+  min-height: 52px;
+}
+
+button.primary:disabled { opacity: 0.4; cursor: default; }
+
+button.ghost {
+  width: 100%;
+  margin-top: 16px;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* Hero card: border colored by the traffic light */
+.hero { border-width: 3px; }
+.hero[data-level="vert"] { border-color: var(--go); }
+.hero[data-level="orange"] { border-color: var(--warn); }
+.hero[data-level="rouge"] { border-color: var(--stop); }
+
+.level { font-size: 1.1rem; text-transform: uppercase; }
+.hero[data-level="vert"] .level { color: var(--go); }
+.hero[data-level="orange"] .level { color: var(--warn); }
+.hero[data-level="rouge"] .level { color: var(--stop); }
+
+.sessions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sessions button {
+  padding: 0 16px;
+  font-weight: 600;
+}
+
+.sessions button.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.exercises {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+  counter-reset: ex;
+}
+
+.exercises li {
+  counter-increment: ex;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.exercises li::before {
+  content: counter(ex);
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  color: var(--muted);
+  width: 1.2em;
+}
+
+.exercises .name { flex: 1; }
+
+.exercises .sets {
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 600;
+  font-size: 1.1rem;
+  white-space: nowrap;
+}
+
+.error {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--stop) 15%, var(--surface));
+  color: var(--stop);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button { transition: background 0.15s, border-color 0.15s; }
+}
