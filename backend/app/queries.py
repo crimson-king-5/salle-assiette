@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Checkin, ProteinEntry, SessionTemplate, UserProfile, Workout, WorkoutExercise, WorkoutSet,
+    Checkin, ProteinEntry, SessionTemplate, UserProfile, WeightEntry, Workout, WorkoutExercise,
+    WorkoutSet,
 )
 
 PROFILE_ID = 1
@@ -68,3 +69,24 @@ def weight_history(db: Session) -> list[tuple[str, float]]:
         .order_by(Workout.finished_at, WorkoutSet.position)
     ).all()
     return [(slug, weight) for slug, weight in rows]
+
+
+def weights_since(db: Session, since: dt.date) -> list[WeightEntry]:
+    """Weigh-ins from `since` on, oldest first. Several on one day → only the latest made."""
+    rows = db.scalars(
+        select(WeightEntry).where(WeightEntry.date >= since)
+        .order_by(WeightEntry.date, WeightEntry.created_at, WeightEntry.id)
+    ).all()
+    per_day = {}
+    for row in rows:  # sorted ascending, so the last one of a day overwrites the others
+        per_day[row.date] = row
+    return list(per_day.values())
+
+
+def latest_weight(db: Session) -> float | None:
+    """Most recent weigh-in (latest date, then latest created_at), if any."""
+    row = db.scalars(
+        select(WeightEntry).order_by(WeightEntry.date.desc(), WeightEntry.created_at.desc(),
+                                     WeightEntry.id.desc())
+    ).first()
+    return row.kg if row else None

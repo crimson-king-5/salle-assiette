@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, NaiveDatetime, field_validator, model_validator
 
-from app.algorithms import PlannedExercise
+from app.algorithms import Equipment, Focus, MuscleGroup, Objective, PlannedExercise
 
 Answer = Literal[1, 3, 5]  # the 3 emoji buttons of each check-in question
 
@@ -89,6 +89,8 @@ class SnapshotExercise(BaseModel):
     sets: int
     reps: str
     rest_seconds: int
+    is_cardio: bool = False
+    cardio_unit: str | None = None
 
 
 class SnapshotSession(BaseModel):
@@ -96,6 +98,7 @@ class SnapshotSession(BaseModel):
     name: str
     focus: str
     formats: dict[FormatName, list[SnapshotExercise]]  # the session in each format
+    startable: bool = True   # False when the session has no exercise: don't offer to start it
 
 
 class ProteinEntryOut(BaseModel):
@@ -105,6 +108,42 @@ class ProteinEntryOut(BaseModel):
     label: str
     grams: int
     created_at: dt.datetime
+
+
+class WeightOut(BaseModel):
+    """One weigh-in of the chart."""
+    id: str            # the phone's UUID (client_id)
+    date: dt.date
+    kg: float
+
+
+class RecordOut(BaseModel):
+    """Best set on one exercise (cardio excluded)."""
+    slug: str
+    name: str
+    weight: float
+    reps: int
+    date: dt.date
+
+
+class RecentWorkoutOut(BaseModel):
+    id: int
+    name: str
+    date: dt.date
+    format: FormatName
+    duration_min: int
+    sets_done: int
+    tonnage: float
+
+
+class ProgressOut(BaseModel):
+    """Numbers of the Progrès screen (SPEC §4.8), computed by the server."""
+    total_workouts: int
+    weeks_held: int                 # "semaines tenues d'affilée" (SPEC §5.5)
+    cardio_minutes_week: int
+    cardio_week_target_min: int     # reference line, 150
+    records: list[RecordOut]        # alphabetical by exercise name
+    recent_workouts: list[RecentWorkoutOut]  # last 6 finished, newest first
 
 
 class SnapshotOut(BaseModel):
@@ -118,6 +157,13 @@ class SnapshotOut(BaseModel):
     week_goal: int
     protein_goal_g: int
     protein_today: list[ProteinEntryOut]
+    target_weight_kg: float
+    objective: Objective
+    coach_enabled: bool
+    kcal_hint: str
+    weights: list[WeightOut]         # last 120 days, oldest first, one per day
+    progress: ProgressOut
+    tips: dict[str, str]             # exercise slug → progression tip (French)
 
 
 class WorkoutSummaryOut(BaseModel):
@@ -196,3 +242,126 @@ class ProteinSyncIn(BaseModel):
 class SyncOut(BaseModel):
     id: int
     created: bool  # False when the document was already on the server (replaced)
+
+
+class WeightSyncIn(BaseModel):
+    """One weigh-in made on the phone."""
+    date: dt.date
+    kg: float = Field(ge=30, le=250)
+    created_at: NaiveDatetime
+
+
+# --- Settings ---
+
+class ProfileUpdateIn(BaseModel):
+    """Every field is optional: only the ones sent are changed."""
+    objective: Objective | None = None
+    sessions_goal: int | None = Field(default=None, ge=1, le=7)
+    protein_goal_g: int | None = Field(default=None, ge=60, le=300)
+    target_weight_kg: float | None = Field(default=None, ge=30, le=250)
+    coach_enabled: bool | None = None
+
+
+class ProfileOut(BaseModel):
+    objective: Objective
+    sessions_goal: int
+    protein_goal_g: int
+    target_weight_kg: float
+    coach_enabled: bool
+    kcal_hint: str
+    kcal_hints: dict[str, str]              # objective → hint, for the picker
+    latest_weight_kg: float | None
+    auto_protein_goal_g: int | None         # from latest weight + objective; None without weigh-in
+
+
+# --- Exercise library and program editor ---
+
+def _clean_text(value: str) -> str:
+    value = value.strip()
+    try:
+        value.encode("utf-8")  # a lone surrogate can't be stored
+    except UnicodeEncodeError:
+        raise ValueError("invalid characters") from None
+    return value
+
+
+class ExerciseOut(BaseModel):
+    slug: str
+    name: str
+    muscle_group: str
+    equipment: str
+    is_isolation: bool
+    is_lower: bool
+    is_cardio: bool
+    cardio_unit: str | None
+    is_custom: bool
+    needs_review: bool   # imported with guessed attributes; cleared by PUT /exercises/{slug}
+    aliases: list[str]
+
+
+class ExerciseCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    muscle_group: MuscleGroup
+    equipment: Equipment
+    is_isolation: bool = False
+    is_lower: bool = False
+    is_cardio: bool = False  # forced to True when muscle_group is "Cardio"
+    cardio_unit: str | None = Field(default=None, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("name must not be empty")
+        return value
+
+
+class SessionExerciseIn(BaseModel):
+    slug: str = Field(max_length=80)
+    sets: int = Field(ge=1, le=10)
+    reps: str = Field(min_length=1, max_length=20)
+
+    @field_validator("reps")
+    @classmethod
+    def reps_not_blank(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("reps must not be empty")
+        return value
+
+
+class SessionNameMixin(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    focus: Focus
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("name must not be empty")
+        return value
+
+
+SessionPreset = Literal[
+    "vide", "pecs-epaules-triceps", "dos-biceps-avant-bras", "jambes-abdos", "full-body",
+    "cardio-gainage",
+]
+
+
+class SessionCreateIn(SessionNameMixin):
+    template: SessionPreset = "vide"
+
+
+class SessionUpdateIn(SessionNameMixin):
+    exercises: list[SessionExerciseIn] = Field(max_length=20)
+
+
+class RotationIn(BaseModel):
+    order: list[str] = Field(min_length=1, max_length=100)  # every session id, in the new order
+
+
+class SessionPresetOut(BaseModel):
+    id: SessionPreset
+    label: str

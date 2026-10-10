@@ -16,12 +16,18 @@ from app.algorithms import Format, apply_format, compute_readiness
 from app.database import Base, DbSession, engine
 from app.models import Checkin, SessionTemplate, to_planned
 from app.queries import get_profile, next_session_id, today_checkin
-from app.migrations import add_client_id_columns
+from app.migrations import add_client_id_columns, add_program_columns
 from app.schemas import CheckinIn, CheckinOut, CheckinSyncIn, ClientId, SessionOut, SyncOut
-from app.seed import seed_default_program
+from app.seed import backfill_aliases, seed_default_program
 from app.protein import router as protein_router
 from app.snapshot import router as snapshot_router
 from app.workouts import router as workouts_router
+from app.weights import router as weights_router
+from app.profile import router as profile_router
+from app.exercises import router as exercises_router
+from app.program import router as program_router
+from app.export import router as export_router
+from app.prototype_import import router as import_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
@@ -30,8 +36,10 @@ def init_database(bind: Engine) -> None:
     """Bring a database (new, or an old salle.db) up to date. Safe to run at every startup."""
     Base.metadata.create_all(bind)  # creates missing tables, e.g. user_profile / protein_log
     add_client_id_columns(bind)  # old salle.db files lack the offline-sync columns
+    add_program_columns(bind)  # ...and the cardio / custom-exercise / coach columns
     with Session(bind) as db:
         seed_default_program(db)
+        backfill_aliases(db)
         get_profile(db)  # makes sure the single settings row exists
 
 
@@ -50,6 +58,23 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "desktop-m7c8gnc.tail696942.ts.net", 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 
+# Browsers send an Origin header on cross-site writes. A page on another site must not be able to
+# change data, even with a "simple" request (text/plain form or fetch, no preflight). Requests
+# without Origin (curl, the test client, same-origin GETs) are not browser cross-site requests.
+ALLOWED_ORIGINS = {
+    "https://desktop-m7c8gnc.tail696942.ts.net", "http://localhost:8001", "http://127.0.0.1:8001",
+}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+@app.middleware("http")
+async def refuse_foreign_origin(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if request.method not in SAFE_METHODS and origin is not None and origin not in ALLOWED_ORIGINS:
+        return JSONResponse(status_code=403, content={"detail": "Origine non autorisée"})
+    return await call_next(request)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """422 without echoing the received values.
@@ -64,6 +89,12 @@ async def validation_error(request: Request, exc: RequestValidationError) -> JSO
 app.include_router(workouts_router)
 app.include_router(protein_router)
 app.include_router(snapshot_router)
+app.include_router(weights_router)
+app.include_router(profile_router)
+app.include_router(exercises_router)
+app.include_router(program_router)
+app.include_router(export_router)
+app.include_router(import_router)
 
 
 @app.middleware("http")

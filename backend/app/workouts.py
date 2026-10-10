@@ -12,7 +12,9 @@ from sqlalchemy.exc import IntegrityError
 
 from app.algorithms import LoggedSet, apply_format, rest_seconds, tonnage
 from app.database import DbSession
-from app.models import Exercise, SessionTemplate, Workout, WorkoutExercise, WorkoutSet, to_planned
+from app.models import (
+    Exercise, SessionTemplate, Workout, WorkoutExercise, WorkoutSet, WorkoutTombstone, to_planned,
+)
 from app.queries import get_profile
 from app.schemas import (
     ClientId, SetOut, SetUpdateIn, SyncOut, WorkoutExerciseOut, WorkoutOut, WorkoutStartIn,
@@ -122,6 +124,9 @@ def sync_workout(client_id: ClientId, body: WorkoutSyncIn, db: DbSession, respon
             raise HTTPException(status_code=422, detail=f"Exercice inconnu : {ex.slug}")
 
     key = str(client_id)
+    if db.get(WorkoutTombstone, key) is not None:
+        response.status_code = 200
+        return SyncOut(id=0, created=False)  # deleted earlier: a late retry must not bring it back
     for attempt in (1, 2):
         exercises = [
             WorkoutExercise(
@@ -209,10 +214,16 @@ def finish_workout(workout_id: int, db: DbSession) -> WorkoutSummaryOut:
 
 @router.delete("/{workout_id}", status_code=204)
 def abandon_workout(workout_id: int, db: DbSession) -> Response:
-    """Abandon: the workout and its sets are deleted."""
+    """Abandon / delete: the workout and its sets are deleted.
+
+    A synced or imported workout (it has a client_id) is remembered in a tombstone so that a late
+    PUT or a re-import of the prototype file cannot bring it back.
+    """
     workout = db.get(Workout, workout_id)
     if workout is None:
         raise HTTPException(status_code=404, detail="Séance inconnue")
+    if workout.client_id and db.get(WorkoutTombstone, workout.client_id) is None:
+        db.add(WorkoutTombstone(client_id=workout.client_id, deleted_at=dt.datetime.now()))
     db.delete(workout)
     db.commit()
     return Response(status_code=204)

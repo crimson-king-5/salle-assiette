@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.algorithms import PlannedExercise
@@ -19,6 +19,14 @@ class Exercise(Base):
     equipment: Mapped[str] = mapped_column(String(40))     # Poids libre, Machine, Poulie…
     is_isolation: Mapped[bool] = mapped_column(default=False)
     is_lower: Mapped[bool] = mapped_column(default=False)
+    # Cardio exercises are timed: reps = minutes, sets = blocks (SPEC §5.4)
+    is_cardio: Mapped[bool] = mapped_column(default=False, server_default="0")
+    cardio_unit: Mapped[str | None] = mapped_column(String(20))  # km/h, niveau…
+    aliases: Mapped[str] = mapped_column(Text, default="", server_default="")  # search words, "|"-separated
+    is_custom: Mapped[bool] = mapped_column(default=False, server_default="0")
+    owner_id: Mapped[int | None]  # unused with a single user; kept for SPEC §3.2
+    # Created by the prototype import with guessed attributes: the user should check them
+    needs_review: Mapped[bool] = mapped_column(default=False, server_default="0")
 
 
 class SessionTemplate(Base):
@@ -136,6 +144,7 @@ class UserProfile(Base):
     sessions_goal: Mapped[int] = mapped_column(default=4)        # workouts per week
     protein_goal_g: Mapped[int] = mapped_column(default=160)     # grams of protein per day
     target_weight_kg: Mapped[float] = mapped_column(default=79.0)
+    coach_enabled: Mapped[bool] = mapped_column(default=True, server_default="1")
 
 
 class ProteinTombstone(Base):
@@ -156,4 +165,31 @@ class ProteinEntry(Base):
     date: Mapped[dt.date] = mapped_column(index=True)
     label: Mapped[str] = mapped_column(String(80))
     grams: Mapped[int]  # grams of protein (not of food)
+    created_at: Mapped[dt.datetime]
+
+
+class WorkoutTombstone(Base):
+    """A deleted synced/imported workout's client_id: stops a late PUT or a re-import bringing it back."""
+    __tablename__ = "workout_tombstone"
+
+    client_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    deleted_at: Mapped[dt.datetime]
+
+
+class WeightTombstone(Base):
+    """A deleted weigh-in's id (same job as ProteinTombstone)."""
+    __tablename__ = "weight_tombstone"
+
+    client_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    deleted_at: Mapped[dt.datetime]
+
+
+class WeightEntry(Base):
+    """One weigh-in (SPEC §3.2 weight_log)."""
+    __tablename__ = "weight_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)  # phone's UUID
+    date: Mapped[dt.date] = mapped_column(index=True)
+    kg: Mapped[float]
     created_at: Mapped[dt.datetime]

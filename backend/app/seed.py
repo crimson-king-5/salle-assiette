@@ -35,6 +35,32 @@ EXERCISES = {
     "mollets-debout": ("Mollets debout", "Jambes", "Machine", True, True),
 }
 
+# Search words (SPEC §4.4); stored in exercise.aliases, "|"-separated
+ALIASES = {
+    "developpe-couche-barre": ["bench press", "bench", "developpe couche"],
+    "rowing-barre": ["barbell row", "tirage barre", "bent over row"],
+    "developpe-militaire": ["overhead press", "military press", "ohp"],
+    "tirage-vertical": ["lat pulldown", "poulie haute", "tirage poitrine", "pulldown"],
+    "curl-halteres": ["biceps curl", "dumbbell curl"],
+    "extension-triceps-poulie": ["pushdown", "triceps pushdown", "poulie haute triceps"],
+    "squat": ["back squat", "squat barre"],
+    "sdt-roumain": ["romanian deadlift", "rdl", "souleve de terre jambes tendues"],
+    "presse-cuisses": ["leg press", "presse a cuisses", "presse inclinee"],
+    "leg-curl": ["ischios", "ischio-jambiers", "hamstring curl"],
+    "mollets-assis": ["calf raise", "seated calf", "soleaire"],
+    "developpe-incline-halteres": ["incline press", "incline dumbbell press"],
+    "tirage-horizontal": ["seated row", "rowing poulie", "poulie basse"],
+    "elevations-laterales": ["lateral raise", "side raise"],
+    "developpe-prise-serree": ["close grip bench", "close-grip"],
+    "curl-incline": ["incline curl", "incline dumbbell curl"],
+    "face-pull": ["facepull", "tirage visage"],
+    "squat-bulgare": ["bulgarian split squat", "split squat"],
+    "hip-thrust": ["pont fessier", "glute bridge", "fessiers"],
+    "leg-extension": ["extension jambes", "quadriceps", "quads"],
+    "leg-curl-assis": ["seated leg curl", "ischios assis"],
+    "mollets-debout": ["standing calf raise", "calf raise", "mollets"],
+}
+
 # (id, name, focus, [(exercise slug, sets, reps), …]) — in rotation order
 DEFAULT_PROGRAM = [
     ("HA", "Haut A", "Force", [
@@ -77,7 +103,8 @@ def seed_default_program(db: Session) -> None:
     for slug, (name, group, equipment, iso, lower) in EXERCISES.items():
         if db.get(Exercise, slug) is None:
             db.add(Exercise(slug=slug, name_fr=name, muscle_group=group,
-                            equipment=equipment, is_isolation=iso, is_lower=lower))
+                            equipment=equipment, is_isolation=iso, is_lower=lower,
+                            aliases="|".join(ALIASES.get(slug, []))))
 
     for position, (session_id, name, focus, exercises) in enumerate(DEFAULT_PROGRAM):
         db.add(SessionTemplate(
@@ -88,3 +115,15 @@ def seed_default_program(db: Session) -> None:
             ],
         ))
     db.commit()
+
+
+def backfill_aliases(db: Session) -> None:
+    """Give the seeded exercises of an older database their search aliases (only if empty)."""
+    changed = False
+    for slug, words in ALIASES.items():
+        exercise = db.get(Exercise, slug)
+        if exercise is not None and not exercise.aliases and not exercise.is_custom:
+            exercise.aliases = "|".join(words)
+            changed = True
+    if changed:
+        db.commit()
