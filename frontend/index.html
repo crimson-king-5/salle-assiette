@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Everything comes from this server, plus Google Fonts and Open Food Facts (barcode lookup).
+       No inline script, and no style="" attribute anywhere (JS sets the gauge width through the DOM API). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://world.openfoodfacts.org; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'">
   <meta name="theme-color" content="#16202B">
   <title>Salle & Assiette</title>
   <link rel="manifest" href="manifest.webmanifest">
@@ -13,7 +16,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main id="today">
+  <main id="today" class="tab">
     <header>
       <p class="date" id="date"></p>
       <h1>Salut Karim</h1>
@@ -60,6 +63,59 @@
     <p id="error" class="error" role="alert" hidden></p>
   </main>
 
+  <!-- Assiette screen (SPEC §4.7): protein counter, quick add, journal, guides -->
+  <main id="assiette" class="tab" hidden>
+    <header>
+      <p class="date" id="a-date"></p>
+      <h1>Assiette</h1>
+    </header>
+
+    <p id="a-pending" class="pending" role="status" hidden></p>
+
+    <section class="card" aria-labelledby="a-counter-title">
+      <h2 id="a-counter-title">Protéines du jour</h2>
+      <p class="protein-total"><strong id="a-total">0</strong><span> / <span id="a-goal">160</span> g</span></p>
+      <div class="gauge" id="a-gauge" role="progressbar" aria-label="Protéines du jour" aria-valuemin="0" aria-valuemax="160" aria-valuenow="0">
+        <div id="a-fill"></div>
+      </div>
+      <p id="a-remaining" class="remaining"></p>
+      <p id="a-suggest" class="muted"></p>
+    </section>
+
+    <section class="card" aria-labelledby="a-quick-title">
+      <h2 id="a-quick-title">Ajout rapide</h2>
+      <p class="muted">Un tap = c'est ajouté. Tu corriges après si besoin.</p>
+      <div class="shortcuts" id="a-shortcuts"></div>
+      <div class="add-actions">
+        <button type="button" id="a-free">✏️ Saisie libre</button>
+        <button type="button" id="a-search">🔎 Chercher un aliment</button>
+        <button type="button" id="a-scan">📷 Scanner un code-barres</button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="a-journal-title">
+      <h2 id="a-journal-title">Journal du jour</h2>
+      <ul class="journal" id="a-journal"></ul>
+      <p class="muted" id="a-journal-empty">Rien pour l'instant. Rien de grave : ça se remplit au fil des repas.</p>
+    </section>
+
+    <details class="card fold" id="a-eatout">
+      <summary>Manger dehors</summary>
+      <div class="fold-body" id="a-eatout-body"></div>
+    </details>
+
+    <details class="card fold" id="a-mealprep">
+      <summary>Meal prep</summary>
+      <div class="fold-body" id="a-mealprep-body"></div>
+    </details>
+
+    <!-- Placeholder: the AI meal coach (SPEC §4.7, §7.2) comes in a later block -->
+    <section class="card coach" aria-labelledby="a-coach-title">
+      <h2 id="a-coach-title">Coach repas — bientôt</h2>
+      <p class="muted">Bientôt, tu pourras me décrire ton repas et je te donnerai mon avis. Pas encore branché.</p>
+    </section>
+  </main>
+
   <!-- Workout mode: full screen, one exercise at a time (SPEC §4.2) -->
   <main id="workout" class="workout" hidden>
     <div class="topbar">
@@ -88,6 +144,26 @@
     </div>
   </main>
 
+  <!-- Bottom tab bar: hidden during a workout. New tabs (Progrès, Réglages) = one more button here
+       + its name in TABS (assiette.js) + a <main id="..." class="tab" hidden>. -->
+  <nav id="tabbar" class="tabbar" aria-label="Navigation principale">
+    <div class="tabs">
+      <button type="button" data-tab="today" class="selected" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 10v4M6 8v8M18 8v8M21 10v4M6 12h12"/></svg>
+        <span>Aujourd'hui</span>
+      </button>
+      <button type="button" data-tab="assiette">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/></svg>
+        <span>Assiette</span>
+      </button>
+    </div>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button type="button" id="toast-action" hidden></button>
+  </div>
+
   <!-- In-app dialog: never confirm()/alert(), they're blocked in some frames (SPEC §8) -->
   <dialog id="dialog">
     <div id="dialog-body"></div>
@@ -95,7 +171,9 @@
   </dialog>
 
   <script src="logic.js"></script>
+  <script src="assiette-data.js"></script>
   <script src="workout.js"></script>
+  <script src="assiette.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

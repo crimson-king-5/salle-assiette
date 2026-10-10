@@ -13,14 +13,13 @@ from sqlalchemy.exc import IntegrityError
 from app.algorithms import LoggedSet, apply_format, rest_seconds, tonnage
 from app.database import DbSession
 from app.models import Exercise, SessionTemplate, Workout, WorkoutExercise, WorkoutSet, to_planned
+from app.queries import get_profile
 from app.schemas import (
     ClientId, SetOut, SetUpdateIn, SyncOut, WorkoutExerciseOut, WorkoutOut, WorkoutStartIn,
     WorkoutSummaryOut, WorkoutSyncIn,
 )
 
 router = APIRouter(prefix="/workouts", tags=["workouts"])
-
-WEEK_GOAL = 4  # SPEC §1; becomes a user setting with the Réglages screen
 
 
 def week_count(db: DbSession, day: dt.date) -> int:
@@ -204,7 +203,7 @@ def finish_workout(workout_id: int, db: DbSession) -> WorkoutSummaryOut:
         tonnage=tonnage(logged),
         duration_min=round(duration.total_seconds() / 60),
         week_count=week_count(db, workout.date),
-        week_goal=WEEK_GOAL,
+        week_goal=get_profile(db).sessions_goal,
     )
 
 

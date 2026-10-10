@@ -122,3 +122,38 @@ class Checkin(Base):
     score: Mapped[int]
     level: Mapped[str] = mapped_column(String(10))
     format: Mapped[str] = mapped_column(String(10))
+
+
+class UserProfile(Base):
+    """Settings of the one user (SPEC §3.2 user_profile). Always a single row, id = 1.
+
+    The Réglages screen (a later block) will edit these; for now they are the defaults.
+    """
+    __tablename__ = "user_profile"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # always PROFILE_ID
+    objective: Mapped[str] = mapped_column(String(20), default="recompo")
+    sessions_goal: Mapped[int] = mapped_column(default=4)        # workouts per week
+    protein_goal_g: Mapped[int] = mapped_column(default=160)     # grams of protein per day
+    target_weight_kg: Mapped[float] = mapped_column(default=79.0)
+
+
+class ProteinTombstone(Base):
+    """A deleted journal line's id. Stops a late PUT (a retry already on its way) from bringing it back."""
+    __tablename__ = "protein_tombstone"
+
+    client_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    deleted_at: Mapped[dt.datetime]
+
+
+class ProteinEntry(Base):
+    """One line of the protein journal (SPEC §3.2 protein_log)."""
+    __tablename__ = "protein_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # UUID made by the phone: the same line sent twice updates this row (offline sync)
+    client_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    date: Mapped[dt.date] = mapped_column(index=True)
+    label: Mapped[str] = mapped_column(String(80))
+    grams: Mapped[int]  # grams of protein (not of food)
+    created_at: Mapped[dt.datetime]

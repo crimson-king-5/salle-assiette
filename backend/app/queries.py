@@ -3,9 +3,35 @@
 import datetime as dt
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Checkin, SessionTemplate, Workout, WorkoutExercise, WorkoutSet
+from app.models import (
+    Checkin, ProteinEntry, SessionTemplate, UserProfile, Workout, WorkoutExercise, WorkoutSet,
+)
+
+PROFILE_ID = 1
+
+
+def get_profile(db: Session) -> UserProfile:
+    """The user's settings. Creates the single row with the defaults if it is missing."""
+    profile = db.get(UserProfile, PROFILE_ID)
+    if profile is None:
+        db.add(UserProfile(id=PROFILE_ID))  # column defaults: recompo, 4 sessions, 160 g, 79 kg
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()  # another request created it at the same moment
+        profile = db.get(UserProfile, PROFILE_ID)
+    return profile
+
+
+def today_protein(db: Session) -> list[ProteinEntry]:
+    """Today's journal lines, oldest first."""
+    return list(db.scalars(
+        select(ProteinEntry).where(ProteinEntry.date == dt.date.today())
+        .order_by(ProteinEntry.created_at, ProteinEntry.id)
+    ).all())
 
 
 def today_checkin(db: Session) -> Checkin | None:

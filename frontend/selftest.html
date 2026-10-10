@@ -85,6 +85,105 @@
     check("check-in of another day is ignored", applyPending(RAW, [ck("2026-10-10T09:00:00")], [], "2026-10-11").checkin_today, null);
     check("input snapshot is not mutated", (() => { ap([wk("HA", "2026-10-10T09:00:00", 80)]); return RAW.week_count; })(), 1);
 
+    // --- protein journal (proteinState / applyPending overlay) ---
+    const TODAY = "2026-10-10";
+    const line = (id, grams, created, label = "x", date = TODAY) => ({ id, date, label, grams, created_at: created });
+    const put = (id, grams, created, label = "x", date = TODAY) =>
+      ({ type: "protein", id, body: { date, label, grams, created_at: created } });
+    const del = (id) => ({ type: "protein-delete", id, body: null });
+    const PRAW = { protein_goal_g: 170, protein_today: [line("a", 35, "2026-10-10T08:00:00"), line("old", 99, "2026-10-09T20:00:00", "x", "2026-10-09")] };
+    const ps = (outbox, sent = [], raw = PRAW) => proteinState(raw, outbox, sent, TODAY);
+    const ids = (st) => st.entries.map((e) => e.id);
+
+    check("snapshot lines of another day are dropped", ids(ps([])), ["a"]);
+    check("goal comes from the snapshot", ps([]).goal, 170);
+    check("goal falls back to 160 without snapshot", proteinState(null, [], [], TODAY), { entries: [], goal: 160 });
+    check("pending add appears in order", ids(ps([put("b", 25, "2026-10-10T07:00:00")])), ["b", "a"]);
+    check("pending add of another day is ignored", ids(ps([put("b", 25, "2026-10-09T07:00:00", "x", "2026-10-09")])), ["a"]);
+    check("pending edit replaces a snapshot line", ps([put("a", 20, "2026-10-10T08:00:00", "Skyr")]).entries, [line("a", 20, "2026-10-10T08:00:00", "Skyr")]);
+    check("outbox edit beats the sent one", ps([put("b", 30, "2026-10-10T09:00:00")], [put("b", 10, "2026-10-10T09:00:00")]).entries[1].grams, 30);
+    check("pending delete removes a snapshot line", ids(ps([del("a")])), []);
+    check("delete wins over a sent add of the same id", ids(ps([del("b")], [put("b", 25, "2026-10-10T09:00:00")])), ["a"]);
+    check("delete wins even if the add is later in the outbox", ids(ps([del("b"), put("b", 25, "2026-10-10T09:00:00")])), ["a"]);
+    check("delete of an unknown id is harmless", ids(ps([del("zzz")])), ["a"]);
+    check("offline with no snapshot still counts pending lines", ids(proteinState(null, [put("b", 25, "2026-10-10T07:00:00")], [], TODAY)), ["b"]);
+    check("applyPending carries the protein state",
+      (({ protein_today, protein_goal_g }) => ({ n: protein_today.length, protein_goal_g }))(applyPending({ ...RAW, ...PRAW }, [put("b", 5, "2026-10-10T10:00:00")], [], TODAY)),
+      { n: 2, protein_goal_g: 170 });
+    check("applyPending on an old cached snapshot (no protein fields)", (({ protein_today, protein_goal_g }) => ({ protein_today, protein_goal_g }))(ap([])), { protein_today: [], protein_goal_g: 160 });
+    check("proteinTotal adds grams", proteinTotal([line("a", 35, ""), line("b", 18, "")]), 53);
+    check("proteinTotal of nothing", proteinTotal([]), 0);
+    check("proteinFor rounds to whole grams", [proteinFor(31, 120), proteinFor(11, 140), proteinFor(0, 100)], [37, 15, 0]);
+    check("cleanLabel trims, squeezes spaces, caps at 80", [cleanLabel("  a   b \n c "), cleanLabel("x".repeat(100)).length, cleanLabel(null)], ["a b c", 80, ""]);
+
+    // --- suggestPortions ---
+    const names = (r) => r.items.map((p) => p.label);
+    check("nothing left, nothing to suggest", suggestPortions(0), { items: [], left: 0 });
+    check("negative remaining (goal passed)", suggestPortions(-20), { items: [], left: 0 });
+    check("50 g = poulet + skyr", names(suggestPortions(50)), ["1 blanc de poulet", "1 skyr"]);
+    check("50 g leaves nothing", suggestPortions(50).left, 0);
+    check("35 g = one poulet", names(suggestPortions(35)), ["1 blanc de poulet"]);
+    check("20 g = 3 œufs (biggest that fits)", names(suggestPortions(20)), ["3 œufs"]);
+    check("10 g = one skyr (small gap)", names(suggestPortions(10)), ["1 skyr"]);
+    check("5 g = almost there, nothing suggested", suggestPortions(5), { items: [], left: 5 });
+    check("160 g = 3 different portions, the rest is left", [names(suggestPortions(160)).length, suggestPortions(160).left], [3, 74]);
+    check("portions never repeat", new Set(names(suggestPortions(200))).size, 3);
+
+    // --- accent-insensitive search ---
+    const FOODS = [{ name: "Œufs durs" }, { name: "Crème dessert" }, { name: "Blanc de poulet", alias: "volaille" }, { name: "Poulet rôti" }, { name: "Lentilles" }];
+    const found = (q) => searchFoods(q, FOODS).map((f) => f.name);
+    check("normalizeText strips accents and œ", normalizeText("  Œufs Crème BRÛLÉE "), "oeufs creme brulee");
+    check("search without accent finds accented name", found("creme"), ["Crème dessert"]);
+    check("search with accent finds unaccented query target", found("rôti"), ["Poulet rôti"]);
+    check("oe matches œ", found("oeuf"), ["Œufs durs"]);
+    check("names starting with the query come first", found("poulet"), ["Poulet rôti", "Blanc de poulet"]);
+    check("all words must match", found("poulet roti"), ["Poulet rôti"]);
+    check("alias is searched", found("volaille"), ["Blanc de poulet"]);
+    check("matches word starts only: oeuf is not boeuf", searchFoods("oeuf", [{ name: "Bœuf cuit" }, { name: "Œuf dur" }]).map((f) => f.name), ["Œuf dur"]);
+    check("a partial word still matches", found("lent"), ["Lentilles"]);
+    check("empty query finds nothing", found("  "), []);
+    check("no match", found("zzz"), []);
+
+    // --- Open Food Facts helpers ---
+    check("barcode: 13 digits ok", validBarcode("3017620422003"), true);
+    check("barcode: spaces around are fine", validBarcode(" 3017 6204 22003 "), true);
+    check("barcode: too short", validBarcode("1234567"), false);
+    check("barcode: too long", validBarcode("123456789012345"), false);
+    check("barcode: letters refused", validBarcode("30176204220a3"), false);
+    check("barcode: URL tricks refused", validBarcode("12345678/../x"), false);
+    check("barcode: null", validBarcode(null), false);
+    check("serving '30 g'", parseServingGrams("30 g"), 30);
+    check("serving '1 pot (125 g)'", parseServingGrams("1 pot (125 g)"), 125);
+    check("serving '2,5g' rounds", parseServingGrams("2,5g"), 3);
+    check("serving in ml is not guessed", parseServingGrams("250 ml"), null);
+    check("serving 'kg' is not grams", parseServingGrams("1 kg"), null);
+    check("serving 'mg' is not grams", parseServingGrams("30 mg"), null);
+    check("serving missing", parseServingGrams(undefined), null);
+    check("off ok", interpretOffProduct({ status: 1, product: { product_name: "Skyr nature", brands: "Danone, Autre", proteins_100g: 11, serving_size: "140 g" } }),
+      { kind: "ok", name: "Skyr nature", brand: "Danone", per100: 11, servingGrams: 140 });
+    check("off protein as string", interpretOffProduct({ status: 1, product: { product_name: "A", proteins_100g: "7.5" } }).per100, 7.5);
+    check("off protein 0 is valid data", interpretOffProduct({ status: 1, product: { product_name: "A", proteins_100g: 0 } }).kind, "ok");
+    check("off no protein data", interpretOffProduct({ status: 1, product: { product_name: "Soda", brands: "X" } }), { kind: "noprotein", name: "Soda", brand: "X" });
+    check("off absurd protein value", interpretOffProduct({ status: 1, product: { product_name: "A", proteins_100g: 400 } }).kind, "noprotein");
+    check("off status 0 = not found", interpretOffProduct({ status: 0, status_verbose: "product not found" }), { kind: "notfound" });
+    check("off garbage = not found", [interpretOffProduct(null), interpretOffProduct({}), interpretOffProduct("x")].map((r) => r.kind), ["notfound", "notfound", "notfound"]);
+    check("off nameless product", interpretOffProduct({ status: 1, product: { proteins_100g: 5 } }).name, "Produit sans nom");
+
+    // --- outbox revisions: a newer edit queued while an older copy is in flight survives ---
+    const rv = (type, id, rev) => ({ type, id, rev, body: {} });
+    check("withoutSent removes only the sent revision", withoutSent([rv("protein", "a", "r2"), rv("workout", "w", "r1")], rv("protein", "a", "r1")).map((i) => i.rev), ["r2", "r1"]);
+    check("withoutSent removes the matching copy", withoutSent([rv("protein", "a", "r1"), rv("protein", "b", "r1")], rv("protein", "a", "r1")).map((i) => i.id), ["b"]);
+    check("withoutSent keeps same id of another type", withoutSent([rv("protein-delete", "a", "r1")], rv("protein", "a", "r1")).length, 1);
+    check("withoutSent works for legacy items without rev", withoutSent([{ type: "checkin", id: "c", body: {} }], { type: "checkin", id: "c", body: {} }), []);
+    check("newRev is different each time", newRev() !== newRev(), true);
+
+    // --- labels: code points, no lone surrogates ---
+    const EMOJI = "🍗";  // a chicken leg: 2 UTF-16 units, 1 character
+    check("cleanLabel never cuts an emoji in two", Array.from(cleanLabel(EMOJI.repeat(100))).length, 80);
+    check("cleanLabel cut result has no lone surrogate", /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cleanLabel("a" + EMOJI.repeat(100), 10)), false);
+    check("cleanLabel drops lone surrogates", [cleanLabel("a\uD800b"), cleanLabel("a\uDC00b"), cleanLabel("x" + EMOJI)], ["ab", "ab", "x" + EMOJI]);
+    check("cleanLabel max argument", cleanLabel("abcdef", 3), "abc");
+
     // --- dates and ids ---
     check("mondayOf a Saturday", mondayOf("2026-10-10"), "2026-10-05");
     check("mondayOf a Monday", mondayOf("2026-10-05"), "2026-10-05");

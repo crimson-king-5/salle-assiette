@@ -4,6 +4,7 @@
 // Finished workouts and check-ins go into an outbox (localStorage) and are sent
 // with idempotent PUTs whenever the PC answers (see syncOutbox).
 // Pure helpers (computeReadiness, tonnage, dates, newId, esc) live in logic.js.
+// The tab bar and the "Assiette" screen (protein journal, same outbox) live in assiette.js.
 
 const QUESTIONS = [
   { field: "energy", label: "Énergie", emojis: ["🪫", "🙂", "⚡"] },
@@ -81,7 +82,8 @@ async function api(path, options = {}) {
   } finally {
     clearTimeout(timer);
   }
-  if (!strict && (response.status === 404 || response.status === 204)) return null;
+  // 204 = success with no body (DELETE); 404 = "nothing there" unless strict
+  if (response.status === 204 || (!strict && response.status === 404)) return null;
   if (!response.ok) {
     const error = new Error(`Erreur serveur (${response.status})`);
     error.status = response.status;
@@ -134,7 +136,8 @@ function renderBanner() {
 
 
 // --- Outbox: finished workouts and check-ins waiting to reach the server ---
-// Each item: { type: "workout" | "checkin", id: <uuid>, body: <document for the PUT> }
+// Each item: { type, id: <uuid>, body: <document for the PUT> } with type one of
+//   "workout" | "checkin" | "protein" (PUT a journal line) | "protein-delete" (DELETE it, body null)
 // Three lists in localStorage:
 //   outbox   -> not sent yet (shown as "en attente de synchro", overlaid on the snapshot)
 //   sent     -> accepted by the server (2xx) but not yet inside a snapshot we hold; still overlaid
@@ -152,7 +155,7 @@ const getRejected = () => getList("rejected");
 function enqueue(type, id, body) {
   // Same id twice (e.g. a crash between two saves) -> keep only the latest copy
   const box = getOutbox().filter((item) => !(item.type === type && item.id === id));
-  box.push({ type, id, body });
+  box.push({ type, id, body, rev: newRev() });
   const saved = store.set("outbox", box);  // false = phone storage full: caller must not lose the data
   renderPending();
   return saved;
@@ -160,8 +163,10 @@ function enqueue(type, id, body) {
 
 function renderPending() {
   const n = getOutbox().length;
-  $("pending").hidden = n === 0;
-  $("pending").textContent = `☁️ ${n} élément${n > 1 ? "s" : ""} en attente de synchro`;
+  for (const id of ["pending", "a-pending"]) {  // Today and Assiette each show it
+    $(id).hidden = n === 0;
+    $(id).textContent = `☁️ ${n} élément${n > 1 ? "s" : ""} en attente de synchro`;
+  }
 
   const r = getRejected().length;
   $("rejected").hidden = r === 0;
@@ -170,7 +175,10 @@ function renderPending() {
 
 function describeItem(item) {
   const b = item.body || {};
-  return item.type === "workout" ? `Séance ${b.name ?? ""} du ${b.date ?? "?"}` : `Check-in du ${b.date ?? "?"}`;
+  if (item.type === "workout") return `Séance ${b.name ?? ""} du ${b.date ?? "?"}`;
+  if (item.type === "protein") return `Protéines : ${b.label ?? "?"} (${Number(b.grams) || 0} g)`;
+  if (item.type === "protein-delete") return "Suppression d'une ligne de protéines";
+  return `Check-in du ${b.date ?? "?"}`;
 }
 
 async function showRejected() {
@@ -202,13 +210,22 @@ async function showRejected() {
 let syncing = false;
 let syncAgain = false;
 
+// How each outbox item type is sent: [HTTP method, route]. All of them are idempotent.
+const SYNC_ROUTES = {
+  workout: ["PUT", "workouts"],
+  checkin: ["PUT", "checkins"],
+  protein: ["PUT", "protein"],
+  "protein-delete": ["DELETE", "protein"],
+};
+
 function moveItem(item, toKey, extra) {
   // Write the destination first, then remove from the outbox: a failure in between
   // only means a harmless re-send later (PUT is idempotent).
   const target = getList(toKey).filter((i) => !(i.type === item.type && i.id === item.id));
   target.push({ ...item, ...extra });
   if (!store.set(toKey, target)) return false;
-  store.set("outbox", getOutbox().filter((i) => !(i.type === item.type && i.id === item.id)));
+  // Only the copy that was sent: a newer edit queued meanwhile (other rev) stays for the next pass
+  store.set("outbox", withoutSent(getOutbox(), item));
   return true;
 }
 
@@ -224,9 +241,13 @@ async function syncOutbox() {
       let sent = 0;
       let stop = false;
       for (const item of getOutbox()) {
-        const path = `/${item.type === "workout" ? "workouts" : "checkins"}/${item.id}`;
+        const route = SYNC_ROUTES[item.type];
+        if (!route) continue;  // a type this version doesn't know: leave it alone
+        const [method, folder] = route;
         try {
-          await api(path, { method: "PUT", body: JSON.stringify(item.body), strict: true });
+          await api(`/${folder}/${item.id}`, {
+            method, body: method === "PUT" ? JSON.stringify(item.body) : undefined, strict: true,
+          });
         } catch (error) {
           if (error instanceof OfflineError) { stop = true; break; }  // PC gone again: retry later
           const status = error.status;
@@ -265,6 +286,7 @@ function withPending(raw) {
 
 function rebuildSnapshot() {
   snapshot = withPending(rawSnapshot);
+  renderAssiette();  // the protein counter reads the same snapshot + queue
 }
 
 
@@ -380,9 +402,10 @@ async function start() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || localDate(new Date()) === shownDay) return;
     shownDay = localDate(new Date());
-    if ($("workout").hidden) showToday();
+    if ($("workout").hidden) { showToday(); renderAssiette(); }
   });
   setupWorkout();
+  setupAssiette();
   renderPending();
   await showToday();
 }

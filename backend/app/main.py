@@ -3,33 +3,41 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import select
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.algorithms import Format, apply_format, compute_readiness
-from app.database import Base, DbSession, SessionLocal, engine
+from app.database import Base, DbSession, engine
 from app.models import Checkin, SessionTemplate, to_planned
-from app.queries import next_session_id, today_checkin
+from app.queries import get_profile, next_session_id, today_checkin
 from app.migrations import add_client_id_columns
 from app.schemas import CheckinIn, CheckinOut, CheckinSyncIn, ClientId, SessionOut, SyncOut
 from app.seed import seed_default_program
+from app.protein import router as protein_router
 from app.snapshot import router as snapshot_router
 from app.workouts import router as workouts_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
 
+def init_database(bind: Engine) -> None:
+    """Bring a database (new, or an old salle.db) up to date. Safe to run at every startup."""
+    Base.metadata.create_all(bind)  # creates missing tables, e.g. user_profile / protein_log
+    add_client_id_columns(bind)  # old salle.db files lack the offline-sync columns
+    with Session(bind) as db:
+        seed_default_program(db)
+        get_profile(db)  # makes sure the single settings row exists
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # On startup: create the tables if they don't exist yet,
-    # and insert the default program on first run.
-    Base.metadata.create_all(engine)
-    add_client_id_columns(engine)  # old salle.db files lack the offline-sync columns
-    with SessionLocal() as db:
-        seed_default_program(db)
+    init_database(engine)
     yield
 
 
@@ -40,7 +48,21 @@ app = FastAPI(title="Salle & Assiette", lifespan=lifespan)
 # "testserver" is the host name used by pytest's TestClient.
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "desktop-m7c8gnc.tail696942.ts.net", "testserver"]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """422 without echoing the received values.
+
+    FastAPI's default answer repeats the bad input; if that input holds characters that can't be
+    encoded (a lone surrogate), building the answer itself crashes and the client gets a 500.
+    """
+    errors = [{"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 app.include_router(workouts_router)
+app.include_router(protein_router)
 app.include_router(snapshot_router)
 
 

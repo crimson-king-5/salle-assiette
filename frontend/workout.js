@@ -38,8 +38,11 @@ function numText(value) {
 
 function showDialog(html, buttons) {
   // Resolves with the value of the button tapped (null if dismissed with Escape).
+  // It resolves from the dialog's "close" event, never before: otherwise a caller that opens
+  // the next dialog at once would get that stale event on its new dialog and see it close.
   return new Promise((resolve) => {
     const dialog = $("dialog");
+    let result = null;
     $("dialog-body").innerHTML = html;
     $("dialog-actions").innerHTML = "";
     for (const b of buttons) {
@@ -47,10 +50,10 @@ function showDialog(html, buttons) {
       el.type = "button";
       el.textContent = b.label;
       el.className = b.className || "";
-      el.addEventListener("click", () => { resolve(b.value); dialog.close(); });
+      el.addEventListener("click", () => { result = b.value; dialog.close(); });
       $("dialog-actions").append(el);
     }
-    dialog.onclose = () => resolve(null);
+    dialog.onclose = () => resolve(result);
     dialog.showModal();
   });
 }
@@ -117,7 +120,7 @@ function resumeWorkout() {
 }
 
 function openWorkout() {
-  $("today").hidden = true;
+  enterWorkoutMode();  // hides the tabs and the tab bar (assiette.js)
   $("workout").hidden = false;
   $("w-name").textContent = workout.name;
   const startedAt = new Date(workout.started_at).getTime();
@@ -132,7 +135,7 @@ function closeWorkout() {
   clearInterval(chronoTimer);
   stopRest();
   $("workout").hidden = true;
-  $("today").hidden = false;
+  leaveWorkoutMode();  // tab bar and the current tab come back (assiette.js)
   showToday();  // refresh the Today screen (app.js)
 }
 

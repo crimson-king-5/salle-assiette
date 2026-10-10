@@ -118,5 +118,156 @@ function applyPending(raw, outbox, sent, today) {
     snap.checkin_today = computeReadiness(b.energy, b.sleep, b.motivation, b.soreness, b.minutes);
     snap.checkin_date = today;
   }
+
+  const protein = proteinState(raw, outbox, sent, today);
+  snap.protein_today = protein.entries;
+  snap.protein_goal_g = protein.goal;
   return snap;
+}
+
+
+// --- Outbox revisions ---
+// Every queued item gets a `rev`. While an item is being sent, the user may queue a newer copy
+// of it (same type + id, other rev): the answer for the old copy must not remove the new one.
+function newRev() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// The outbox without the entry that was actually sent (same type, id AND rev).
+function withoutSent(outbox, sentItem) {
+  return outbox.filter((i) => !(i.type === sentItem.type && i.id === sentItem.id && i.rev === sentItem.rev));
+}
+
+
+// --- Protein journal (SPEC §4.7) ---
+// Outbox item types: "protein" = PUT a line (add or correct), "protein-delete" = DELETE it.
+
+const DEFAULT_PROTEIN_GOAL = 160;
+const MAX_LINE_GRAMS = 300;  // KEEP IN SYNC with ProteinSyncIn in backend/app/schemas.py
+
+// Today's journal as the phone must show it: the cached snapshot's lines, then every queued or
+// just-sent change on top. A delete wins over any add/edit of the same id, whatever the order
+// (ids are never reused). `raw` may be null (the PC was never reached).
+function proteinState(raw, outbox, sent, today) {
+  const lines = new Map();  // id -> { id, date, label, grams, created_at }
+  const keep = (line) => { if (line.date === today) lines.set(line.id, { ...line }); };
+
+  for (const line of (raw && raw.protein_today) || []) keep(line);
+
+  const pending = [...sent, ...outbox];  // sent first: an outbox edit is newer than a sent one
+  for (const item of pending) {
+    if (item.type === "protein") keep({ id: item.id, ...item.body });
+  }
+  for (const item of pending) {
+    if (item.type === "protein-delete") lines.delete(item.id);
+  }
+
+  const entries = [...lines.values()]
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const goal = (raw && Number(raw.protein_goal_g)) || DEFAULT_PROTEIN_GOAL;
+  return { entries, goal };
+}
+
+function proteinTotal(entries) {
+  return entries.reduce((sum, e) => sum + (Number(e.grams) || 0), 0);
+}
+
+// Grams of protein in `grams` g of a food that has `per100` g of protein per 100 g. Whole grams.
+function proteinFor(per100, grams) {
+  return Math.round((Number(per100) * Number(grams)) / 100);
+}
+
+// A journal label: trimmed, single spaces, at most `max` characters (80 = the server's limit).
+// Cut by code points (an emoji is never split in two) and lone surrogates are dropped: they
+// cannot be encoded as UTF-8 and the server would refuse the line for good.
+function cleanLabel(text, max = 80) {
+  const clean = String(text ?? "")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
+    .replace(/\s+/g, " ").trim();
+  return Array.from(clean).slice(0, max).join("").trim();
+}
+
+// Portions used to turn "grams left to eat" into something concrete. Same values as the shortcuts.
+const SUGGESTION_PORTIONS = [
+  { label: "1 blanc de poulet", grams: 35 },
+  { label: "1 steak", grams: 26 },
+  { label: "1 boîte de thon", grams: 25 },
+  { label: "1 shake de whey", grams: 24 },
+  { label: "3 œufs", grams: 18 },
+  { label: "1 portion de lentilles", grams: 18 },
+  { label: "1 fromage blanc", grams: 16 },
+  { label: "1 skyr", grams: 15 },
+];
+
+// remaining grams → { items: [portion…], left } : up to 3 different portions, each time the
+// biggest one that still fits. 50 g → poulet (35) + skyr (15). `left` = grams not covered.
+// Under the smallest portion: one skyr if at least 8 g are missing, otherwise nothing.
+function suggestPortions(remaining, portions = SUGGESTION_PORTIONS) {
+  const sorted = [...portions].sort((a, b) => b.grams - a.grams);  // stable: ties keep list order
+  const smallest = sorted[sorted.length - 1];
+  const items = [];
+  let left = Math.round(remaining);
+  while (left > 0 && items.length < 3) {
+    const fit = sorted.find((p) => p.grams <= left && !items.includes(p));
+    if (fit) { items.push(fit); left -= fit.grams; continue; }
+    if (items.length === 0 && left >= 8) { items.push(smallest); left = Math.max(0, left - smallest.grams); }
+    break;
+  }
+  return { items, left: Math.max(0, left) };
+}
+
+
+// --- Food search (accent-insensitive) ---
+
+// "Œufs Durs" → "oeufs durs", "Crème fraîche" → "creme fraiche"
+function normalizeText(text) {
+  return String(text ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/œ/gi, "oe").replace(/æ/gi, "ae").toLowerCase().trim();
+}
+
+// foods: [{ name, alias?, … }]. Every word of the query must START a word of the name or the alias;
+// names that start with the query come first. Empty query → [].
+function searchFoods(query, foods) {
+  const words = normalizeText(query).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const first = words[0];
+  return foods
+    .map((food) => ({
+      food,
+      name: normalizeText(food.name),
+      tokens: normalizeText(`${food.name} ${food.alias ?? ""}`).split(/[^a-z0-9]+/),
+    }))
+    .filter((x) => words.every((w) => x.tokens.some((t) => t.startsWith(w))))  // word starts: "oeuf" is not "boeuf"
+    .sort((a, b) => Number(b.name.startsWith(first)) - Number(a.name.startsWith(first)))  // stable
+    .map((x) => x.food);
+}
+
+
+// --- Open Food Facts (barcode) ---
+
+// Only digits, 8 to 14 of them (EAN-8 … GTIN-14): checked before the code goes into a URL.
+function validBarcode(code) {
+  return /^\d{8,14}$/.test(String(code ?? "").replace(/\s+/g, ""));
+}
+
+// "30 g" → 30, "1 pot (125 g)" → 125, "2 x 60g" → 60, "250 ml" → null. Whole grams, 1 to 1000.
+function parseServingGrams(text) {
+  const match = /(\d+(?:[.,]\d+)?)\s*g(?![a-z])/i.exec(String(text ?? ""));
+  if (!match) return null;
+  const grams = Math.round(Number(match[1].replace(",", ".")));
+  return grams >= 1 && grams <= 1000 ? grams : null;
+}
+
+// The JSON answer of Open Food Facts → what the screen needs.
+//   { kind: "notfound" } | { kind: "noprotein", name, brand } |
+//   { kind: "ok", name, brand, per100, servingGrams }
+function interpretOffProduct(json) {
+  const product = json && json.status !== 0 && json.product;
+  if (!product || typeof product !== "object") return { kind: "notfound" };
+  const name = cleanLabel(product.product_name) || "Produit sans nom";
+  const brand = cleanLabel(String(product.brands ?? "").split(",")[0]);
+  const raw = product.proteins_100g;
+  const per100 = raw === "" || raw == null ? NaN : Number(raw);
+  if (!Number.isFinite(per100) || per100 < 0 || per100 > 100) return { kind: "noprotein", name, brand };
+  return { kind: "ok", name, brand, per100, servingGrams: parseServingGrams(product.serving_size) };
 }

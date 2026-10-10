@@ -11,9 +11,9 @@ from sqlalchemy import select
 from app.algorithms import apply_format, latest_weights, rest_seconds
 from app.database import DbSession
 from app.models import SessionTemplate, to_planned
-from app.queries import next_session_id, today_checkin, weight_history
-from app.schemas import CheckinOut, SnapshotExercise, SnapshotOut, SnapshotSession
-from app.workouts import WEEK_GOAL, week_count
+from app.queries import get_profile, next_session_id, today_checkin, today_protein, weight_history
+from app.schemas import CheckinOut, ProteinEntryOut, SnapshotExercise, SnapshotOut, SnapshotSession
+from app.workouts import week_count
 
 router = APIRouter(tags=["offline"])
 
@@ -38,6 +38,7 @@ def snapshot_session(template: SessionTemplate) -> SnapshotSession:
 def get_snapshot(db: DbSession) -> SnapshotOut:
     templates = db.scalars(select(SessionTemplate).order_by(SessionTemplate.position)).all()
     checkin = today_checkin(db)
+    profile = get_profile(db)
     return SnapshotOut(
         generated_at=dt.datetime.now(),
         sessions=[snapshot_session(t) for t in templates],
@@ -48,5 +49,10 @@ def get_snapshot(db: DbSession) -> SnapshotOut:
             if checkin else None
         ),
         week_count=week_count(db, dt.date.today()),
-        week_goal=WEEK_GOAL,
+        week_goal=profile.sessions_goal,
+        protein_goal_g=profile.protein_goal_g,
+        protein_today=[
+            ProteinEntryOut(id=e.client_id, date=e.date, label=e.label, grams=e.grams, created_at=e.created_at)
+            for e in today_protein(db)
+        ],
     )

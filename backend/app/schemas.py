@@ -9,7 +9,7 @@ import datetime as dt
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field, NaiveDatetime, model_validator
+from pydantic import BaseModel, Field, NaiveDatetime, field_validator, model_validator
 
 from app.algorithms import PlannedExercise
 
@@ -98,6 +98,15 @@ class SnapshotSession(BaseModel):
     formats: dict[FormatName, list[SnapshotExercise]]  # the session in each format
 
 
+class ProteinEntryOut(BaseModel):
+    """One line of today's protein journal."""
+    id: str            # the phone's UUID (client_id)
+    date: dt.date
+    label: str
+    grams: int
+    created_at: dt.datetime
+
+
 class SnapshotOut(BaseModel):
     """Everything the phone needs to work with the PC switched off."""
     generated_at: dt.datetime
@@ -107,6 +116,8 @@ class SnapshotOut(BaseModel):
     checkin_today: CheckinOut | None
     week_count: int
     week_goal: int
+    protein_goal_g: int
+    protein_today: list[ProteinEntryOut]
 
 
 class WorkoutSummaryOut(BaseModel):
@@ -160,6 +171,26 @@ class CheckinSyncIn(CheckinIn):
     """A check-in made on the phone. The result is NOT sent: the server recomputes it."""
     date: dt.date
     created_at: NaiveDatetime
+
+
+class ProteinSyncIn(BaseModel):
+    """One journal line made on the phone (or corrected there)."""
+    date: dt.date
+    label: str = Field(max_length=80)
+    grams: int = Field(ge=0, le=300)  # grams of protein in the line
+    created_at: NaiveDatetime
+
+    @field_validator("label")
+    @classmethod
+    def label_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label must not be empty")
+        try:
+            value.encode("utf-8")  # a lone surrogate (broken emoji) can't be stored: refuse it cleanly
+        except UnicodeEncodeError:
+            raise ValueError("label contains invalid characters") from None
+        return value
 
 
 class SyncOut(BaseModel):
