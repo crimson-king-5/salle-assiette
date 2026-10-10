@@ -569,6 +569,8 @@ function importRows(r) {
     ["Protéines", `${r.protein_created} créée${r.protein_created > 1 ? "s" : ""} · ${r.protein_updated} mise${r.protein_updated > 1 ? "s" : ""} à jour`],
     ["Ignorés (supprimés dans l'app depuis)", String(r.skipped_deleted)],
   ];
+  const partial = r.skipped_partial || 0;
+  if (partial > 0) rows.push(["Séances interrompues", `${partial} séance${partial > 1 ? "s" : ""} interrompue${partial > 1 ? "s" : ""} ignorée${partial > 1 ? "s" : ""}`]);
   return `<ul class="rows">${rows.map(([label, value]) => `<li><span class="jr-label">${esc(label)}</span><span class="jr-sub">${esc(value)}</span></li>`).join("")}</ul>
     ${r.weights_skipped > 0 ? `<p class="muted hint">Pesées ignorées : une pesée plus récente existe déjà ce jour-là.</p>` : ""}`;
 }

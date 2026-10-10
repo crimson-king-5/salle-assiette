@@ -23,6 +23,7 @@ from app.algorithms import normalize_text, slugify
 from app.models import Exercise
 
 VENDOR_DIR = Path(__file__).resolve().parents[2] / "vendor" / "exercises-dataset"
+NAMES_FR_PATH = Path(__file__).resolve().parent / "data" / "exercise_names_fr.json"  # dataset id -> French name
 MAX_DATASET_BYTES = 60 * 1024 * 1024  # the real file is ~17 MB; refuse anything absurd
 log = logging.getLogger(__name__)
 ATTRIBUTION = "© Gym visual — gymvisual.com"
@@ -230,6 +231,27 @@ def load_records(dataset_dir: Path | None = None) -> dict[str, Record]:
     return records
 
 
+def load_french_names(path: Path | None = None) -> dict[str, str]:
+    """Dataset id -> French display name, from the committed translation file ({} when missing or unreadable).
+
+    Every entry is validated like the dataset itself (a bad entry is skipped, never fatal). The English name
+    stays the slug and becomes a search alias (see import_library).
+    """
+    try:
+        with (path or NAMES_FR_PATH).open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, RecursionError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    names: dict[str, str] = {}
+    for dataset_id, name in data.items():
+        text = _clean(name, MAX_NAME)
+        if isinstance(dataset_id, str) and _ID.match(dataset_id) and text:
+            names[dataset_id] = text
+    return names
+
+
 # --- French search aliases (SPEC §4.4: "presse à cuisses", "butterfly", "poulie haute"…) ---
 
 # (regex on the normalized english name, aliases). Every matching rule adds its words.
@@ -399,33 +421,59 @@ def _library_slug(db: Session, record: Record, taken: set[str]) -> str:
     return slug
 
 
-def import_library(db: Session, dataset_dir: Path | None = None) -> dict[str, int]:
+def import_library(db: Session, dataset_dir: Path | None = None,
+                   names_fr: dict[str, str] | None = None) -> dict[str, int]:
     """Idempotent: add / refresh the dataset exercises, keyed on dataset id. Does nothing without the dataset.
 
     - an existing row with that dataset id is refreshed (library rows fully; linked seed rows only their media);
     - custom exercises are never touched (they never carry a dataset id);
+    - library rows get their French name (`names_fr`, the committed translation file by default). Slugs stay the
+      English ones; the English name becomes a search alias. A French name that is already taken by one of
+      Karim's own exercises (or by another library row) is not used: the row keeps its English name;
+    - the translations are keyed on the real dataset's ids, so they apply by default only to the default dataset
+      (dataset_dir=None); pass `names_fr` to translate another one;
     - one commit at the end.
     """
     records = load_records(dataset_dir)
-    stats = {"records": len(records), "created": 0, "updated": 0, "linked": 0}
+    stats = {"records": len(records), "created": 0, "updated": 0, "linked": 0, "french": 0, "clashes": 0}
     if not records:
         return stats
+    if names_fr is None:
+        names_fr = load_french_names() if dataset_dir is None else {}
     stats["linked"] = link_existing(db, records)
     by_dataset = {e.dataset_id: e for e in db.scalars(select(Exercise).where(Exercise.dataset_id.is_not(None)))}
+    # Names a French translation must not take: everything that is not a library row refreshed below
+    used = {normalize_text(e.name_fr) for e in db.scalars(select(Exercise))
+            if not (e.is_library and e.dataset_id in records)}
     taken: set[str] = set()
+    assigned: set[str] = set()  # names given to library rows in this run
     for dataset_id, record in records.items():
         row = by_dataset.get(dataset_id)
         is_new = row is None
+        if row is not None and not row.is_library:
+            continue  # a seeded exercise linked to this record: it was already refreshed by link_existing
+        name, aliases = record.name, list(record.aliases)
+        french = names_fr.get(dataset_id)
+        if french:
+            if normalize_text(french) in used:
+                stats["clashes"] += 1  # taken (Karim's own exercise, another row): keep the clash-free English name
+            else:
+                name = french
+                stats["french"] += 1
+                aliases = [record.english] + aliases  # "lat pulldown", "leg press" keep working
+        if normalize_text(name) in assigned:  # the English fallback equals a name given earlier in this run
+            name = f"{name} ({dataset_id})"
+        assigned.add(normalize_text(name))
+        used.add(normalize_text(name))
+        aliases = [a for i, a in enumerate(aliases) if a != normalize_text(name) and a not in aliases[:i]]
         if row is None:
-            row = Exercise(slug=_library_slug(db, record, taken), name_fr=record.name, is_library=True)
+            row = Exercise(slug=_library_slug(db, record, taken), name_fr=name, is_library=True)
             db.add(row)
             stats["created"] += 1
-        elif not row.is_library:
-            continue  # a seeded exercise linked to this record: it was already refreshed by link_existing
         fields = {
-            "name_fr": record.name, "muscle_group": record.muscle_group, "equipment": record.equipment,
+            "name_fr": name, "muscle_group": record.muscle_group, "equipment": record.equipment,
             "is_isolation": record.is_isolation, "is_lower": record.is_lower, "is_cardio": record.is_cardio,
-            "cardio_unit": record.cardio_unit, "aliases": "|".join(record.aliases),
+            "cardio_unit": record.cardio_unit, "aliases": "|".join(aliases),
             "is_custom": False, "needs_review": False,
         }
         for key, value in fields.items():

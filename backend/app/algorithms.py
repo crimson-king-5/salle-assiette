@@ -303,7 +303,22 @@ def slugify(name: str) -> str:
 # --- Guessing attributes of an exercise the library doesn't know (prototype import) ---
 
 # Names the prototype renamed over time (SPEC §11): normalized old name → current name
-PROTOTYPE_RENAMES = {"pec deck": "Pec deck (butterfly)"}
+PROTOTYPE_RENAMES = {
+    "pec deck": "Pec deck (butterfly)",
+    # Names Karim used in the prototype -> the library / seeded exercise they mean (French library names)
+    "ecarte poulie vis a vis": "Vis-à-vis à la poulie (variante)",
+    "curl poignets": "Curl poignets sur banc aux haltères",
+    "curl poignets inverse": "Curl poignets inversé sur banc aux haltères",
+    "souleve de terre": "Soulevé de terre à la barre",
+    "tirage vertical prise inversee": "Tirage vertical prise supination à la poulie",
+    "curl barre": "Curl à la barre",
+    "tirage horizontal poulie": "Tirage horizontal",
+    "curl incline": "Curl incliné haltères",
+    "developpe halteres assis": "Développé épaules assis aux haltères",
+    "extension triceps corde": "Extension triceps à la poulie (avec corde)",
+    "crunch": "Crunch au sol",
+    "tapis de course marche inclinee": "Marche sur tapis incliné",
+}
 
 # (keywords, cardio unit) — checked against the normalized name
 CARDIO_KEYWORDS = (

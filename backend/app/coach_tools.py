@@ -491,7 +491,7 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
              "is_isolation": BOOL, "is_lower": BOOL, "is_cardio": BOOL, "cardio_unit": S,
          }, ["name", "muscle_group", "equipment"])),
     Tool("search_exercises", SearchExercisesArgs, search_exercises,
-         "Cherche dans la bibliothèque (1300+ exercices, noms anglais, mots-clés français) sans rien modifier. "
+         "Cherche dans la bibliothèque (1300+ exercices, noms français, mots-clés anglais acceptés) sans rien modifier. "
          "À utiliser avant d'ajouter un exercice absent de la liste du contexte. 15 résultats maximum.",
          _obj({
              "query": {**S, "description": "Mot-clé, ex. presse, butterfly, poulie, smith, hack squat"},

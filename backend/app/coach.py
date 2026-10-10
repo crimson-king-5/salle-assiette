@@ -112,7 +112,7 @@ def library_text(db: Session) -> str:
         groups.setdefault(f"{e.muscle_group}", []).append(f"{e.name_fr} [{e.equipment}]")
     text = "\n".join(f"- {group} : {' ; '.join(names)}" for group, names in groups.items())
     if hidden:
-        text += (f"\n(+ {hidden} autres exercices dans la bibliothèque complète, noms anglais : "
+        text += (f"\n(+ {hidden} autres exercices dans la bibliothèque complète, noms français : "
                  "outil search_exercises pour les trouver.)")
     return text
 
@@ -173,7 +173,7 @@ TOOL_RULES = (
     "séances 1-7 par semaine, poids 30-250 kg, au moins une séance dans la rotation. "
     "Chaque changement est affiché à Karim avec un bouton Annuler. "
     "Pour un exercice qui n'est pas dans la liste du contexte, cherche-le avec search_exercises "
-    "(noms anglais, mots-clés français) puis utilise le nom EXACT renvoyé."
+    "(noms français, mots-clés anglais acceptés) puis utilise le nom EXACT renvoyé."
 )
 NO_TOOLS = (
     "Tu es en mode conseil : tu n'as aucun outil, tu ne peux rien modifier dans l'app. "

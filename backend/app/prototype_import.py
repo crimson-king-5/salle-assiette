@@ -198,6 +198,7 @@ class ImportOut(BaseModel):
     protein_created: int
     protein_updated: int
     skipped_deleted: int           # lines / workouts deleted since an earlier import
+    skipped_partial: int = 0       # interrupted sessions: a later log of the same day contains them entirely
 
 
 MAX_NEW_EXERCISES = 200
@@ -329,7 +330,7 @@ async def import_prototype(
         dry_run=dry_run, sessions_created=0, sessions_updated=0, goals_updated=False,
         exercises_created=[], exercises_to_review=[], workouts_created=0, workouts_updated=0,
         weights_created=0, weights_updated=0, weights_skipped=0, protein_created=0,
-        protein_updated=0, skipped_deleted=0,
+        protein_updated=0, skipped_deleted=0, skipped_partial=0,
     )
     custom_by_name = {normalize_text(name): c for name, c in data.custom.items()}
     slug_cache: dict[str, str] = {}
@@ -421,11 +422,49 @@ def import_program(db, data: Prototype, resolve, out: ImportOut) -> None:
         existing[session_id].position = position
 
 
+def is_prefix_of(early: ProtoLog, late: ProtoLog) -> bool:
+    """True when every exercise of `early` is in `late` and its sets are the first sets of the later one."""
+    if not early.ex:
+        return False
+    later = {}
+    for ex in late.ex:
+        later.setdefault(normalize_text(Library.canonical(ex.n)), ex)
+    for ex in early.ex:
+        match = later.get(normalize_text(Library.canonical(ex.n)))
+        if match is None or len(ex.sets) > len(match.sets):
+            return False
+        if any((a.w, a.r) != (b.w, b.r) for a, b in zip(ex.sets, match.sets)):
+            return False
+    return True
+
+
+MAX_RESTART_MS = 3 * 3600 * 1000       # a restart happens within 3 h of the interrupted start
+MAX_GAP_AFTER_END_MS = 30 * 60 * 1000  # ...and within 30 min of the interrupted log's end
+
+
+def drop_interrupted_logs(logs: list[ProtoLog]) -> tuple[list[ProtoLog], int]:
+    """A session restarted after an interruption leaves two logs the same day (same session key): the earlier
+    one is skipped when it is a prefix of the later one (nothing is lost). Two different logs are both kept."""
+    skipped: set[int] = set()
+    for i, early in enumerate(logs):
+        if early.startedAt is None or not early.session.strip():
+            continue
+        for late in logs:
+            if (late is not early and late.date == early.date and late.session == early.session
+                    and late.startedAt is not None and early.startedAt < late.startedAt <= early.startedAt + MAX_RESTART_MS
+                    and (early.finishedAt is None or late.startedAt <= early.finishedAt + MAX_GAP_AFTER_END_MS)
+                    and is_prefix_of(early, late)):
+                skipped.add(i)
+                break
+    return [log for i, log in enumerate(logs) if i not in skipped], len(skipped)
+
+
 def import_workouts(db, data: Prototype, resolve, out: ImportOut) -> None:
     known = {w.client_id: w for w in db.scalars(select(Workout).where(Workout.client_id.is_not(None)))}
     dead = set(db.scalars(select(WorkoutTombstone.client_id)))
     seen: dict[tuple, int] = {}
-    for log in data.logs:
+    logs, out.skipped_partial = drop_interrupted_logs(data.logs)
+    for log in logs:
         anchor = log.startedAt if log.startedAt is not None else f"{log.session}|{log.name}"
         slot = (log.date, anchor)
         seen[slot] = seen.get(slot, 0) + 1  # the n-th such workout that day

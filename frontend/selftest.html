@@ -211,19 +211,25 @@
     // --- exercise library search (searchLibrary) ---
     const LIB = [
       { name: "Presse à cuisses", aliases: ["leg press"], muscle_group: "Jambes", equipment: "Machine", is_library: false },
-      { name: "Lever seated fly", aliases: ["pec deck", "butterfly"], muscle_group: "Pectoraux", equipment: "Machine", is_library: true },
-      { name: "Butterfly yoga pose", aliases: [], muscle_group: "Jambes", equipment: "Poids du corps", is_library: true },
-      { name: "Dumbbell bench press", aliases: ["developpe couche"], muscle_group: "Pectoraux", equipment: "Poids libre", is_library: true },
-      { name: "Stationary bike", aliases: ["velo"], muscle_group: "Cardio", equipment: "Machine", is_library: true },
+      { name: "Pec deck (butterfly)", aliases: ["lever seated fly", "pec deck", "butterfly"], muscle_group: "Pectoraux", equipment: "Machine", is_library: true },
+      { name: "Posture du papillon (yoga)", aliases: ["butterfly yoga pose"], muscle_group: "Jambes", equipment: "Poids du corps", is_library: true },
+      { name: "Développé couché aux haltères", aliases: ["dumbbell bench press", "developpe couche"], muscle_group: "Pectoraux", equipment: "Poids libre", is_library: true },
+      { name: "Vélo stationnaire", aliases: ["stationary bike", "velo"], muscle_group: "Cardio", equipment: "Machine", is_library: true },
+      { name: "Tirage vertical à la poulie", aliases: ["cable pulldown", "lat pulldown"], muscle_group: "Dos", equipment: "Poulie", is_library: true },
     ];
     const lib = (q) => searchLibrary(q, LIB.map((e) => ({ ...e }))).map((e) => e.name);
-    check("library: alias in French", lib("PRESSE à"), ["Presse à cuisses"]);
-    check("library: name match before alias match", lib("butterfly"), ["Butterfly yoga pose", "Lever seated fly"]);
-    check("library: word starts only (velo is not developpe)", lib("velo"), ["Stationary bike"]);
-    check("library: group and equipment words", lib("pectoraux machine"), ["Lever seated fly"]);
-    check("library: empty query keeps everything", lib("  ").length, 5);
+    check("library: alias in English", lib("LEG press"), ["Presse à cuisses"]);
+    check("library: accents and capitals do not matter", lib("PRESSE à"), ["Presse à cuisses"]);
+    check("library: French name without the accent", lib("developpe"), ["Développé couché aux haltères"]);
+    check("library: old English name still found", lib("lever seated fly"), ["Pec deck (butterfly)"]);
+    check("library: name match before alias match", lib("papillon"), ["Posture du papillon (yoga)"]);
+    check("library: shared alias word, alias hit and name hit", lib("butterfly"), ["Pec deck (butterfly)", "Posture du papillon (yoga)"]);
+    check("library: word starts only (velo is not developpe)", lib("velo"), ["Vélo stationnaire"]);
+    check("library: English alias of a pulldown", lib("lat pulldown"), ["Tirage vertical à la poulie"]);
+    check("library: group and equipment words", lib("pectoraux machine"), ["Pec deck (butterfly)"]);
+    check("library: empty query keeps everything", lib("  ").length, 6);
     check("library: no match", lib("zzz"), []);
-    check("library: own exercises before library ones on equal rank", lib("machine"), ["Presse à cuisses", "Lever seated fly", "Stationary bike"]);
+    check("library: own exercises before library ones on equal rank", lib("machine"), ["Presse à cuisses", "Pec deck (butterfly)", "Vélo stationnaire"]);
 
     // --- labels: code points, no lone surrogates ---
     const EMOJI = "🍗";  // a chicken leg: 2 UTF-16 units, 1 character
