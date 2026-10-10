@@ -27,6 +27,14 @@ class Exercise(Base):
     owner_id: Mapped[int | None]  # unused with a single user; kept for SPEC §3.2
     # Created by the prototype import with guessed attributes: the user should check them
     needs_review: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # The big library (app/library.py). dataset_id is the id in the third-party dataset: the import key.
+    dataset_id: Mapped[str | None] = mapped_column(String(16), unique=True, index=True)
+    is_library: Mapped[bool] = mapped_column(default=False, server_default="0")  # imported, read-only
+    media_image: Mapped[str | None] = mapped_column(String(160))  # "images/0001-x.jpg" (180x180 thumbnail)
+    media_gif: Mapped[str | None] = mapped_column(String(160))    # "videos/0001-x.gif" (180x180 animation)
+    steps_fr: Mapped[str] = mapped_column(Text, default="", server_default="")        # JSON list of strings
+    target_muscle: Mapped[str | None] = mapped_column(String(60))
+    secondary_muscles: Mapped[str] = mapped_column(Text, default="", server_default="")  # JSON list
 
 
 class SessionTemplate(Base):

@@ -22,7 +22,9 @@ Format = Literal["complete", "minimale", "express"]
 MuscleGroup = Literal[
     "Pectoraux", "Dos", "Épaules", "Biceps", "Triceps", "Avant-bras", "Abdos", "Jambes", "Cardio",
 ]
-Equipment = Literal["Poids libre", "Machine", "Poulie", "Poids du corps"]
+Equipment = Literal[
+    "Poids libre", "Machine", "Poulie", "Poids du corps", "Smith", "Kettlebell", "Barre EZ", "Élastique", "Autre",
+]
 Objective = Literal["recompo", "muscle", "perte", "forme"]
 Focus = Literal["Force", "Hypertrophie", "Libre"]
 MUSCLE_GROUPS: tuple[str, ...] = get_args(MuscleGroup)

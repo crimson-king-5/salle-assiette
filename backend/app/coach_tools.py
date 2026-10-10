@@ -25,7 +25,7 @@ from app import profile as profile_routes
 from app import program as program_routes
 from app import protein as protein_routes
 from app import weights as weights_routes
-from app.algorithms import Equipment, Focus, MuscleGroup, Objective, matches_query, normalize_text
+from app.algorithms import EQUIPMENT_KINDS, Equipment, Focus, MuscleGroup, Objective, matches_query, normalize_text
 from app.models import Exercise, ProteinEntry, ProteinTombstone, SessionExercise, SessionTemplate, WeightEntry, WeightTombstone
 from app.queries import get_profile
 from app.schemas import (
@@ -46,8 +46,9 @@ class ToolError(Exception):
 
 
 class ToolOutcome:
-    def __init__(self, summary: str, result: dict, undo: dict):
+    def __init__(self, summary: str, result: dict, undo: dict, read_only: bool = False):
         self.summary, self.result, self.undo = summary, result, undo
+        self.read_only = read_only  # nothing changed: no action record, no Annuler button
 
 
 # --- Argument models (the model's JSON is checked here before anything is touched) ---
@@ -107,6 +108,16 @@ class CustomExerciseArgs(Args):
     cardio_unit: str | None = Field(default=None, max_length=20)
 
 
+MAX_SEARCH_RESULTS = 15
+
+
+class SearchExercisesArgs(Args):
+    query: str = Field(default="", max_length=120)
+    group: MuscleGroup | None = None
+    equipment: Equipment | None = None
+    max_results: int = Field(default=10, ge=1, le=MAX_SEARCH_RESULTS)
+
+
 class GoalsArgs(Args):
     # No coach_enabled here: the coach must not be able to switch itself on or off
     objective: Objective | None = None
@@ -161,9 +172,11 @@ def find_exercise(db: Session, name: str) -> Exercise:
     if exact is not None:
         return exact
     library = list(db.scalars(select(Exercise)))
+    words = normalize_text(name).split()
     partial = [e for e in library
-               if matches_query(name, [e.name_fr, *exercises_routes.aliases_of(e)])]
-    if len(partial) == 1:
+               if exercises_routes.matches_words(words, [e.name_fr, *exercises_routes.aliases_of(e)])]
+    # Only one of Karim's own exercises is picked on a partial match: a library hit may be the wrong variant
+    if len(partial) == 1 and not partial[0].is_library:
         return partial[0]
     if partial:
         close = [e.name_fr for e in partial]
@@ -343,6 +356,19 @@ def create_custom_exercise(db: Session, a: CustomExerciseArgs) -> ToolOutcome:
                        {"slug": created.slug, "name": created.name}, {"exercise_slug": created.slug})
 
 
+def search_exercises(db: Session, a: SearchExercisesArgs) -> ToolOutcome:
+    """Read-only: look up the big library (names, French aliases, group, equipment)."""
+    found = exercises_routes.search_library(db, a.query, a.group or "", a.equipment or "")
+    shown = found[:a.max_results]
+    result = {
+        "résultats": [{"nom": e.name_fr, "groupe": e.muscle_group, "matériel": e.equipment} for e in shown],
+        "total_trouvés": len(found),
+    }
+    if len(found) > len(shown):
+        result["note"] = "Il y en a d'autres : précise la recherche (mot-clé, groupe ou matériel)."
+    return ToolOutcome(f"{len(found)} exercice(s) trouvé(s)", result, {}, read_only=True)
+
+
 def update_goals(db: Session, a: GoalsArgs) -> ToolOutcome:
     changes = a.model_dump(exclude_none=True)
     if not changes:
@@ -461,9 +487,19 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
              "name": S,
              "muscle_group": _enum("Pectoraux", "Dos", "Épaules", "Biceps", "Triceps", "Avant-bras",
                                    "Abdos", "Jambes", "Cardio"),
-             "equipment": _enum("Poids libre", "Machine", "Poulie", "Poids du corps"),
+             "equipment": _enum(*EQUIPMENT_KINDS),
              "is_isolation": BOOL, "is_lower": BOOL, "is_cardio": BOOL, "cardio_unit": S,
          }, ["name", "muscle_group", "equipment"])),
+    Tool("search_exercises", SearchExercisesArgs, search_exercises,
+         "Cherche dans la bibliothèque (1300+ exercices, noms anglais, mots-clés français) sans rien modifier. "
+         "À utiliser avant d'ajouter un exercice absent de la liste du contexte. 15 résultats maximum.",
+         _obj({
+             "query": {**S, "description": "Mot-clé, ex. presse, butterfly, poulie, smith, hack squat"},
+             "group": _enum("Pectoraux", "Dos", "Épaules", "Biceps", "Triceps", "Avant-bras",
+                            "Abdos", "Jambes", "Cardio"),
+             "equipment": _enum(*EQUIPMENT_KINDS),
+             "max_results": {**INT, "description": "1 à 15 (défaut 10)"},
+         })),
     Tool("update_goals", GoalsArgs, update_goals,
          "Change les objectifs : objectif principal, séances/semaine (1-7), protéines/jour (60-300 g), poids visé (30-250 kg).",
          _obj({"objective": _enum("recompo", "muscle", "perte", "forme"), "sessions_goal": INT,

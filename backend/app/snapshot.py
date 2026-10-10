@@ -10,6 +10,8 @@ from sqlalchemy import select
 
 from app.algorithms import KCAL_HINTS, apply_format, latest_weights, rest_seconds
 from app.database import DbSession
+from app.exercises import to_exercise_detail
+from app.library import media_file
 from app.models import SessionTemplate, to_planned
 from app.progress import build_progress, build_tips
 from app.queries import (
@@ -35,6 +37,7 @@ def snapshot_session(template: SessionTemplate) -> SnapshotSession:
                 slug=p.slug, name=p.name, sets=p.sets, reps=p.reps,
                 rest_seconds=rest_seconds(template.focus, exercises[p.slug].is_isolation),
                 is_cardio=exercises[p.slug].is_cardio, cardio_unit=exercises[p.slug].cardio_unit,
+                thumb=media_file(exercises[p.slug].media_image), gif=media_file(exercises[p.slug].media_gif),
             )
             for p in apply_format(to_planned(template), fmt)
         ]
@@ -74,4 +77,7 @@ def get_snapshot(db: DbSession) -> SnapshotOut:
         ],
         progress=build_progress(db, today, profile.sessions_goal),
         tips=build_tips(db),
+        exercise_details={
+            se.exercise_slug: to_exercise_detail(se.exercise) for t in templates for se in t.exercises
+        },
     )

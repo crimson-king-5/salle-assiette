@@ -173,6 +173,8 @@
     <h2 id="ex-name"></h2>
     <p id="ex-info" class="muted"></p>
     <div id="sets"></div>
+    <!-- Animation of the current exercise (tap = full-screen viewer), filled by workout.js -->
+    <div id="ex-media" class="ex-media" hidden></div>
 
     <div class="nav">
       <button type="button" id="prev">Précédent</button>
@@ -221,6 +223,9 @@
     <button type="button" id="toast-action" hidden></button>
   </div>
 
+  <!-- Full-screen exercise viewer (exercices.js): animation, badges, French steps, attribution -->
+  <dialog id="viewer" class="viewer" aria-labelledby="viewer-title"></dialog>
+
   <!-- In-app dialog: never confirm()/alert(), they're blocked in some frames (SPEC §8) -->
   <dialog id="dialog">
     <div id="dialog-body"></div>
@@ -233,6 +238,7 @@
   <script src="assiette.js"></script>
   <script src="progres.js"></script>
   <script src="coach.js"></script>
+  <script src="exercices.js"></script>
   <script src="reglages.js"></script>
   <script src="programme.js"></script>
   <script src="app.js"></script>

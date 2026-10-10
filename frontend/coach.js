@@ -259,7 +259,7 @@ async function exerciseAdviceFlow(slug, sessionId) {
   const replacement = (await loadExercises()).find((e) => e.name === advice.swap_for);
   const index = draft.exercises.findIndex((e) => e.slug === slug);
   if (!replacement || index < 0 || draft.exercises.some((e) => e.slug === replacement.slug)) return;
-  draft.exercises[index] = { ...draft.exercises[index], slug: replacement.slug, name: replacement.name };
+  draft.exercises[index] = { ...draft.exercises[index], slug: replacement.slug, name: replacement.name, thumb: replacement.thumb || null };
   draftDirty = true;
   drawSession();
 }

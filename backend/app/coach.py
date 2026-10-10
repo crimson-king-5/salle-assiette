@@ -27,7 +27,7 @@ from app import coach_tools, gemini
 from app.algorithms import KCAL_HINTS
 from app.database import DbSession
 from app.exercises import find_by_name
-from app.models import CoachAction, CoachMessage, Exercise, Workout
+from app.models import CoachAction, CoachMessage, Exercise, SessionExercise, Workout
 from app.program import ordered_templates
 from app.queries import get_profile, latest_weight, today_checkin, today_protein
 from app.workouts import week_count
@@ -97,10 +97,24 @@ def program_text(db: Session) -> str:
 
 
 def library_text(db: Session) -> str:
+    """A SHORT list for the model: the program's exercises, Karim's own (seed + custom) ones.
+
+    The rest of the big library (1300+ imported exercises) is never dumped here: the model finds
+    them with the search_exercises tool.
+    """
+    in_program = set(db.scalars(select(SessionExercise.exercise_slug)))
     groups: dict[str, list[str]] = {}
+    hidden = 0
     for e in db.scalars(select(Exercise).order_by(Exercise.muscle_group, Exercise.name_fr)):
+        if e.is_library and e.slug not in in_program:
+            hidden += 1
+            continue
         groups.setdefault(f"{e.muscle_group}", []).append(f"{e.name_fr} [{e.equipment}]")
-    return "\n".join(f"- {group} : {' ; '.join(names)}" for group, names in groups.items())
+    text = "\n".join(f"- {group} : {' ; '.join(names)}" for group, names in groups.items())
+    if hidden:
+        text += (f"\n(+ {hidden} autres exercices dans la bibliothèque complète, noms anglais : "
+                 "outil search_exercises pour les trouver.)")
+    return text
 
 
 def recent_workouts_text(db: Session) -> str:
@@ -157,7 +171,9 @@ TOOL_RULES = (
     "d'outil. Si un outil renvoie une erreur avec des noms proches, corrige-toi avec ces noms. "
     "N'annonce un changement que si l'outil a répondu ok. Bornes : séries 1-10, protéines 60-300 g/jour, "
     "séances 1-7 par semaine, poids 30-250 kg, au moins une séance dans la rotation. "
-    "Chaque changement est affiché à Karim avec un bouton Annuler."
+    "Chaque changement est affiché à Karim avec un bouton Annuler. "
+    "Pour un exercice qui n'est pas dans la liste du contexte, cherche-le avec search_exercises "
+    "(noms anglais, mots-clés français) puis utilise le nom EXACT renvoyé."
 )
 NO_TOOLS = (
     "Tu es en mode conseil : tu n'as aucun outil, tu ne peux rien modifier dans l'app. "
@@ -287,7 +303,7 @@ def read_candidate(data: dict) -> tuple[dict, list[dict], str]:
 def run_call(db: Session, thread: str, call: dict, allowed: list[str], applied: list[CoachAction]) -> dict:
     """Execute one function call from the model; the returned dict is the functionResponse payload."""
     name = call.get("name")
-    if len(applied) >= MAX_ACTIONS_PER_TURN:
+    if len(applied) >= MAX_ACTIONS_PER_TURN and name != "search_exercises":
         return {"error": f"Trop de modifications dans un seul tour (maximum {MAX_ACTIONS_PER_TURN})."}
     try:
         outcome = coach_tools.execute_tool(db, name, call.get("args"), allowed)
@@ -296,6 +312,8 @@ def run_call(db: Session, thread: str, call: dict, allowed: list[str], applied: 
         if error.close:
             payload["noms_proches"] = error.close
         return payload
+    if outcome.read_only:  # a lookup: nothing to record or undo
+        return {"ok": True, **outcome.result}
     try:
         action = CoachAction(
             thread=thread, message_id=None, tool=name, args=json.dumps(call.get("args") or {}, ensure_ascii=False),

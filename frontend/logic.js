@@ -291,6 +291,30 @@ function searchFoods(query, foods) {
 }
 
 
+// Search over the library: every word of the query must START a word of the name, an alias, the group or
+// the equipment ("velo" is not inside "développé"). Name matches first, then Karim's own exercises, then A-Z.
+function searchLibrary(query, items) {
+  const words = normalizeText(query).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return items;
+  const phrase = words.join(" ");
+  const hits = [];
+  for (const e of items) {
+    if (!e._tokens) {  // computed once per exercise, not at every keystroke
+      e._name = normalizeText(e.name);
+      e._nameTokens = e._name.split(/[^a-z0-9]+/).filter(Boolean);
+      e._tokens = normalizeText(`${e.name} ${e.aliases.join(" ")} ${e.muscle_group} ${e.equipment}`).split(/[^a-z0-9]+/).filter(Boolean);
+    }
+    if (words.every((w) => e._tokens.some((t) => t.startsWith(w)))) {
+      const inName = words.every((w) => e._nameTokens.some((t) => t.startsWith(w)));
+      // same tiers as search_library (backend/app/exercises.py): phrase in the name, words in the name, the rest
+      const tier = e._name.includes(phrase) ? 0 : inName ? 1 : 2;
+      hits.push({ e, rank: tier * 2 + (e.is_library ? 1 : 0), i: hits.length });
+    }
+  }
+  return hits.sort((a, b) => a.rank - b.rank || a.i - b.i).map((h) => h.e);
+}
+
+
 // --- Open Food Facts (barcode) ---
 
 // Only digits, 8 to 14 of them (EAN-8 … GTIN-14): checked before the code goes into a URL.

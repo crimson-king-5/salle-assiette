@@ -3,13 +3,14 @@
 // and say "Connecte-toi au PC pour modifier le programme" when it can't be reached.
 // Each sub-screen is drawn into #r-view (reglages.js owns the home view and the click wiring:
 // a button with data-act="name" calls R_ACTIONS.name).
-// Uses $, api, OfflineError, refreshSnapshot, showToday (app.js), showDialog (workout.js),
+// Uses $, api, OfflineError, offline, refreshSnapshot, showToday (app.js), thumbHtml, creditLine, openViewer,
+// snapshotDetail, askCoachAbout (exercices.js), showDialog (workout.js),
 // showForm, showToast, formError (assiette.js), searchFoods, esc (logic.js), apiMessage,
 // R_ACTIONS, rView (reglages.js).
 
 // KEEP IN SYNC with MuscleGroup / Equipment / Focus in backend/app/algorithms.py
 const MUSCLES = ["Pectoraux", "Dos", "Épaules", "Biceps", "Triceps", "Avant-bras", "Abdos", "Jambes", "Cardio"];
-const EQUIPMENTS = ["Poids libre", "Machine", "Poulie", "Poids du corps"];
+const EQUIPMENTS = ["Poids libre", "Machine", "Poulie", "Poids du corps", "Smith", "Kettlebell", "Barre EZ", "Élastique", "Autre"];
 const FOCUSES = ["Force", "Hypertrophie", "Libre"];
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;  // same limit as the server
 
@@ -18,7 +19,8 @@ let presetCache = null;    // GET /session-templates
 let exerciseCache = null;  // GET /exercises (the whole library, sorted by name)
 let draft = null;          // the session being edited: { id, name, focus, exercises: [...] }
 let draftDirty = false;
-const exState = { q: "", group: "" };  // library filters: group = "" | "perso" | "review" | a muscle group
+const EX_PAGE = 60;  // library rows drawn at a time (1 300+ exercises: never all at once)
+const exState = { q: "", group: "", equip: "", shown: EX_PAGE };  // library filters: group = "" | "perso" | "review" | a muscle group
 
 const optionList = (values, selected) =>
   values.map((v) => `<option value="${esc(v)}"${v === selected ? " selected" : ""}>${esc(v)}</option>`).join("");
@@ -48,7 +50,8 @@ function afterProgramChange() {
 }
 
 async function loadExercises() {
-  if (!exerciseCache) exerciseCache = await api("/exercises", { strict: true });
+  // 1 300+ exercises (~430 kB): more than the default 5 s on a slow link, but still online-only
+  if (!exerciseCache) exerciseCache = await api("/exercises", { strict: true, timeout: 20000 });
   return exerciseCache;
 }
 
@@ -182,7 +185,9 @@ function editSession(id) {
   if (!session) return;
   draft = {
     id, name: session.name, focus: session.focus,
-    exercises: session.exercises.map((e) => ({ slug: e.slug, name: e.name, sets: e.sets, reps: e.reps })),
+    exercises: session.exercises.map((e) => ({
+      slug: e.slug, name: e.name, sets: e.sets, reps: e.reps, thumb: (snapshotDetail(e.slug) || {}).thumb || null,
+    })),
   };
   draftDirty = false;
   drawSession();
@@ -202,11 +207,12 @@ function drawSession(focusSelector = null, error = "") {
     <section class="card" aria-labelledby="se-ex-title">
       <h2 id="se-ex-title">Exercices</h2>
       <p class="muted">En version minimale, seuls les 3 premiers sont gardés (2 en express) : mets l'essentiel en haut.</p>
+      ${draft.exercises.some((e) => e.thumb) ? creditLine() : ""}
       ${draft.exercises.length === 0
         ? `<p class="muted empty-note-block">Séance vide : ajoute au moins un exercice pour pouvoir la lancer.</p>`
         : `<ol class="ex-list">${draft.exercises.map((e, i) => `
           <li class="ex-row">
-            <p class="ex-name">${i + 1}. ${esc(e.name)}</p>
+            <div class="ex-head">${thumbHtml(e.slug, e.name, e.thumb)}<p class="ex-name">${i + 1}. ${esc(e.name)}</p></div>
             <div class="ex-controls form">
               <label>Séries<input type="number" inputmode="numeric" min="1" max="10" data-field="sets" data-i="${i}" value="${esc(e.sets)}"></label>
               <label>Reps<input type="text" maxlength="20" autocomplete="off" data-field="reps" data-i="${i}" value="${esc(e.reps)}"></label>
@@ -282,7 +288,7 @@ async function addExerciseToDraft() {
   if (!exercise) return;
   draftDirty = true;
   draft.exercises.push({
-    slug: exercise.slug, name: exercise.name,
+    slug: exercise.slug, name: exercise.name, thumb: exercise.thumb || null,
     sets: exercise.is_cardio ? 1 : 3, reps: exercise.is_cardio ? "20" : "8-12",  // cardio: minutes
   });
   drawSession(`[data-act="ex-del"][data-i="${draft.exercises.length - 1}"]`);
@@ -295,32 +301,45 @@ async function addExerciseToDraft() {
 
 // Search dialog over the library. Returns the exercise tapped, or null.
 async function pickExercise() {
-  const SHOWN = 60;
+  const SHOWN = 40;
   for (;;) {
     const all = await loadExercises();  // again after "Exercice perso": the library changed
-    const items = all.map((e) => ({ ...e, alias: `${e.aliases.join(" ")} ${e.muscle_group} ${e.equipment}` }));
     let picked = null;
     const shown = showDialog(`
       <h2>Ajouter un exercice</h2>
-      <div class="form"><input id="xp-query" type="search" autocomplete="off" placeholder="squat, biceps, poulie…" aria-label="Chercher un exercice"></div>
+      <div class="form"><input id="xp-query" type="search" autocomplete="off" placeholder="squat, presse, butterfly, poulie…" aria-label="Chercher un exercice"></div>
+      <p class="muted pick-note" id="xp-note"></p>
       <ul class="results" id="xp-results"></ul>`,
       [{ label: "Fermer", value: null }, { label: "Exercice perso", value: "create" }],
     );
     const draw = () => {
       const query = $("xp-query").value;
-      const found = query.trim() ? searchFoods(query, items) : items;
+      // Nothing typed: Karim's own exercises (the 1 300 others are one search away)
+      const found = query.trim() ? searchLibrary(query, all) : all.filter((e) => !e.is_library);
+      const list = found.slice(0, SHOWN);
+      $("xp-note").textContent = query.trim() ? "" : `Tes exercices. Cherche pour trouver les ${all.length} de la bibliothèque.`;
       $("xp-results").innerHTML = found.length === 0
         ? `<li class="muted">Rien trouvé. Tu peux créer un exercice perso.</li>`
-        : found.slice(0, SHOWN).map((e) => `<li><button type="button" data-i="${items.indexOf(e)}">
-            <span>${esc(e.name)} ${badges(e)}</span><small>${esc(exMeta(e))}</small></button></li>`).join("")
+        : (list.some((e) => e.thumb) ? `<li class="credit-row">${creditLine()}</li>` : "")
+          + list.map((e) => `<li class="pick-item">${thumbHtml(e.slug, e.name, e.thumb, "peek")}
+            <button type="button" data-slug="${esc(e.slug)}"><span>${esc(e.name)} ${badges(e)}</span><small>${esc(exMeta(e))}</small></button></li>`).join("")
           + (found.length > SHOWN ? `<li class="muted">… ${found.length - SHOWN} de plus : précise ta recherche.</li>` : "");
     };
     const body = $("dialog-body");
     body.oninput = draw;
     body.onclick = (event) => {
-      const button = event.target.closest("button[data-i]");
+      const peek = event.target.closest("button[data-peek]");
+      if (peek) {  // thumbnail: the viewer, with "Choisir cet exercice"
+        openViewer(peek.dataset.peek, { name: peek.dataset.name }, { choose: true }).then((action) => {
+          if (action !== "choose") return;
+          picked = all.find((e) => e.slug === peek.dataset.peek) || null;
+          $("dialog").close();
+        });
+        return;
+      }
+      const button = event.target.closest("button[data-slug]");
       if (!button) return;
-      picked = items[Number(button.dataset.i)];
+      picked = all.find((e) => e.slug === button.dataset.slug) || null;
       $("dialog").close();
     };
     draw();
@@ -331,7 +350,7 @@ async function pickExercise() {
       await exerciseForm(null);
       continue;  // the library changed: search again
     }
-    return picked ? all.find((e) => e.slug === picked.slug) : null;
+    return picked;
   }
 }
 
@@ -339,8 +358,7 @@ async function pickExercise() {
 // --- Exercise library ---
 
 async function openExercises(group = "") {
-  exState.q = "";
-  exState.group = group;
+  Object.assign(exState, { q: "", group, equip: "", shown: EX_PAGE });
   setView("exercises", `${backButton()}<p class="muted">Chargement…</p>`);
   try {
     await loadExercises();
@@ -357,49 +375,59 @@ function drawExercises() {
   setView("exercises", `${backButton()}
     <section class="card" aria-labelledby="ex-title">
       <h2 id="ex-title">Bibliothèque</h2>
-      <p class="muted">Les exercices de la bibliothèque sont en lecture seule. Tes exercices perso, tu peux les modifier.</p>
+      <p class="muted">${all.length} exercices. Ceux de la bibliothèque sont en lecture seule : touche-en un pour voir l'animation et les consignes. Tes exercices perso, tu peux les modifier.</p>
       ${review > 0 ? `<p class="tip">${review} exercice${review > 1 ? "s" : ""} importé${review > 1 ? "s" : ""} à vérifier.
         <button type="button" class="link" data-act="ex-filter-review">Voir</button></p>` : ""}
       <div class="form">
-        <label>Chercher<input id="ex-q" type="search" autocomplete="off" value="${esc(exState.q)}" placeholder="squat, biceps, poulie…"></label>
-        <label>Filtrer<select id="ex-group">
+        <label>Chercher<input id="ex-q" type="search" autocomplete="off" value="${esc(exState.q)}" placeholder="squat, presse, butterfly, poulie…"></label>
+        <label>Muscle<select id="ex-group">
           <option value="">Tous</option>
           <option value="perso"${exState.group === "perso" ? " selected" : ""}>Perso</option>
           <option value="review"${exState.group === "review" ? " selected" : ""}>À vérifier</option>
           ${MUSCLES.map((m) => `<option value="${esc(m)}"${exState.group === m ? " selected" : ""}>${esc(m)}</option>`).join("")}
         </select></label>
+        <label>Matériel<select id="ex-equip">
+          <option value="">Tous</option>
+          ${EQUIPMENTS.map((m) => `<option value="${esc(m)}"${exState.equip === m ? " selected" : ""}>${esc(m)}</option>`).join("")}
+        </select></label>
       </div>
       <button type="button" class="primary" data-act="ex-new">Créer un exercice perso</button>
+      ${creditLine()}
+      <p class="muted ex-count" id="ex-count" role="status"></p>
       <ul class="rows ex-library" id="ex-list"></ul>
+      <button type="button" class="wide" id="ex-more" data-act="ex-more" hidden></button>
     </section>`);
   drawExerciseList();
 }
 
+// The rows are drawn EX_PAGE at a time ("Afficher la suite"): the library stays fast with 1 300+ entries
 function drawExerciseList() {
-  const group = exState.group;
+  const { group, equip } = exState;
   let items = exerciseCache.filter((e) => (
-    group === "" ? true : group === "perso" ? e.is_custom : group === "review" ? e.needs_review : e.muscle_group === group));
-  if (exState.q.trim()) {
-    const wanted = new Set(searchFoods(exState.q, items.map((e) => ({ ...e, alias: `${e.aliases.join(" ")} ${e.muscle_group} ${e.equipment}` }))).map((e) => e.slug));
-    items = items.filter((e) => wanted.has(e.slug));
-  }
+    (group === "" ? true : group === "perso" ? e.is_custom : group === "review" ? e.needs_review : e.muscle_group === group)
+    && (equip === "" || e.equipment === equip)));
+  if (exState.q.trim()) items = searchLibrary(exState.q, items);
+  const list = items.slice(0, exState.shown);
+  $("ex-count").textContent = items.length === 0 ? "" : `${items.length} exercice${items.length > 1 ? "s" : ""}`;
   $("ex-list").innerHTML = items.length === 0
     ? `<li class="muted">Aucun exercice ne correspond.</li>`
-    : items.map((e) => `<li><button type="button" class="journal-row" data-act="ex-open" data-slug="${esc(e.slug)}">
-        <span class="jr-main"><span class="jr-label">${esc(e.name)} ${badges(e)}</span><small>${esc(exMeta(e))}</small></span>
-        <span class="jr-sub" aria-hidden="true">${e.is_custom ? "›" : ""}</span></button></li>`).join("");
+    : list.map((e) => `<li class="ex-item">${thumbHtml(e.slug, e.name, e.thumb)}
+        <button type="button" class="journal-row" data-act="ex-open" data-slug="${esc(e.slug)}">
+          <span class="jr-main"><span class="jr-label">${esc(e.name)} ${badges(e)}</span><small>${esc(exMeta(e))}</small></span>
+          <span class="jr-sub" aria-hidden="true">›</span></button></li>`).join("");
+  const more = $("ex-more");
+  const left = items.length - list.length;
+  more.hidden = left <= 0;
+  more.textContent = `Afficher la suite (${left} restant${left > 1 ? "s" : ""})`;
 }
 
 async function openExercise(slug) {
   const exercise = (await loadExercises()).find((e) => e.slug === slug);
   if (!exercise) return;
   if (!exercise.is_custom) {
-    await showDialog(
-      `<h2>${esc(exercise.name)}</h2>
-       <p class="muted">${esc(exMeta(exercise))}${exercise.is_cardio ? " · cardio" : exercise.is_isolation ? " · isolation" : ""}</p>
-       <p class="muted">Exercice de la bibliothèque : il n'est pas modifiable. Tu peux créer ton propre exercice si tu veux une variante.</p>`,
-      [{ label: "Fermer", value: true, className: "primary" }],
-    );
+    // Library / seeded exercise: read-only, so the viewer (animation, muscles, steps) is the whole story
+    const action = await openViewer(exercise.slug, { name: exercise.name }, { coach: !offline && coachEnabled() });
+    if (action === "coach") askCoachAbout(exercise.slug, exercise.name);
     return;
   }
   await exerciseForm(exercise);
@@ -639,7 +667,8 @@ function setupProgramme() {
     },
     "ex-new": () => exerciseForm(null),  // afterExerciseChange (inside) redraws the list
     "ex-open": (data) => openExercise(data.slug),
-    "ex-filter-review": () => { exState.group = "review"; drawExercises(); },
+    "ex-filter-review": () => { exState.group = "review"; exState.shown = EX_PAGE; drawExercises(); },
+    "ex-more": () => { exState.shown += EX_PAGE; drawExerciseList(); },
     "import-confirm": () => confirmImport(),
     "import-cancel": () => openImport(),
     "import-edit": async (data) => {
@@ -651,11 +680,12 @@ function setupProgramme() {
   const view = $("r-view");
   view.addEventListener("input", (event) => {
     if (rView === "session") onSessionInput(event.target);
-    if (rView === "exercises" && event.target.id === "ex-q") { exState.q = event.target.value; drawExerciseList(); }
+    if (rView === "exercises" && event.target.id === "ex-q") { exState.q = event.target.value; exState.shown = EX_PAGE; drawExerciseList(); }
   });
   view.addEventListener("change", (event) => {
     if (rView === "session") onSessionInput(event.target);
-    if (rView === "exercises" && event.target.id === "ex-group") { exState.group = event.target.value; drawExerciseList(); }
+    if (rView === "exercises" && event.target.id === "ex-group") { exState.group = event.target.value; exState.shown = EX_PAGE; drawExerciseList(); }
+    if (rView === "exercises" && event.target.id === "ex-equip") { exState.equip = event.target.value; exState.shown = EX_PAGE; drawExerciseList(); }
     if (rView === "import" && event.target.id === "im-file") {
       onImportFile(event.target.files[0]).catch((error) => showToast(importErrorText(error), null, null, 7000));
       event.target.value = "";  // choosing the same file again must fire "change" again

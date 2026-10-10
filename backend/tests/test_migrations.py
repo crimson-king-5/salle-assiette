@@ -119,3 +119,22 @@ def test_init_database_on_a_fresh_file_has_the_new_columns(tmp_path):
         assert db.get(UserProfile, 1).coach_enabled is True
         assert db.get(Exercise, "tirage-vertical").aliases.startswith("lat pulldown")
     engine.dispose()
+
+
+def test_old_database_gets_the_library_columns_and_the_import_runs_at_startup(tmp_path, monkeypatch):
+    from app import library
+    from tests.test_library import GOOD, write_dataset  # noqa: PLC0415
+    monkeypatch.setattr(library, "VENDOR_DIR", write_dataset(tmp_path / "vendor", GOOD, media=False))
+    path = tmp_path / "old.db"
+    make_old_db(path)
+    engine = create_engine(f"sqlite:///{path}")
+    init_database(engine)
+    init_database(engine)  # idempotent
+    inspector = inspect(engine)
+    assert {"dataset_id", "is_library", "media_image", "media_gif", "steps_fr", "target_muscle",
+            "secondary_muscles"} <= {c["name"] for c in inspector.get_columns("exercise")}
+    assert any(i["name"] == "ix_exercise_dataset_id" and i["unique"] for i in inspector.get_indexes("exercise"))
+    with Session(engine) as db:
+        assert db.query(Exercise).filter(Exercise.is_library).count() == 5
+        assert db.get(Exercise, "squat").dataset_id == "0043"  # the old squat got its animation
+    engine.dispose()

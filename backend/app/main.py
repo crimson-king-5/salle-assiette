@@ -1,10 +1,12 @@
 import datetime as dt
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import select
@@ -29,6 +31,7 @@ from app.program import router as program_router
 from app.export import router as export_router
 from app.prototype_import import router as import_router
 from app.coach import router as coach_router
+from app.library import import_library, media_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
@@ -41,6 +44,11 @@ def init_database(bind: Engine) -> None:
     with Session(bind) as db:
         seed_default_program(db)
         backfill_aliases(db)
+        try:
+            import_library(db)  # the big exercise library, only when the vendor dataset is there
+        except Exception:  # optional: it must never stop the app from starting
+            db.rollback()
+            logging.getLogger(__name__).exception("Exercise library import failed; continuing without it")
         get_profile(db)  # makes sure the single settings row exists
 
 
@@ -97,6 +105,7 @@ app.include_router(program_router)
 app.include_router(export_router)
 app.include_router(import_router)
 app.include_router(coach_router)
+app.include_router(media_router)
 
 
 @app.middleware("http")
@@ -107,7 +116,23 @@ async def always_check_app_files(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/app/"):
         response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+class GzipExceptMedia:
+    """GZip for JSON/HTML/JS, but not for the already-compressed exercise images and GIFs."""
+
+    def __init__(self, app):
+        self.plain = app
+        self.gzip = GZipMiddleware(app, minimum_size=1024)
+
+    async def __call__(self, scope, receive, send):
+        use_plain = scope["type"] != "http" or scope["path"].startswith("/media/")
+        await (self.plain if use_plain else self.gzip)(scope, receive, send)
+
+
+app.add_middleware(GzipExceptMedia)
 
 
 @app.get("/", include_in_schema=False)

@@ -4,10 +4,11 @@ from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.algorithms import matches_query, normalize_text, slugify
+from app.algorithms import normalize_text, slugify
 from app.database import DbSession
 from app.models import Exercise, SessionExercise, WorkoutExercise
-from app.schemas import ExerciseCreateIn, ExerciseOut
+from app.library import ATTRIBUTION, media_file, secondary_of, steps_of
+from app.schemas import ExerciseCreateIn, ExerciseDetailOut, ExerciseOut
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
 
@@ -23,20 +24,38 @@ def to_exercise_out(e: Exercise) -> ExerciseOut:
         slug=e.slug, name=e.name_fr, muscle_group=e.muscle_group, equipment=e.equipment,
         is_isolation=e.is_isolation, is_lower=e.is_lower, is_cardio=e.is_cardio,
         cardio_unit=e.cardio_unit, is_custom=e.is_custom, needs_review=e.needs_review, aliases=aliases_of(e),
+        is_library=e.is_library, thumb=media_file(e.media_image),
+    )
+
+
+def to_exercise_detail(e: Exercise) -> ExerciseDetailOut:
+    gif = media_file(e.media_gif)
+    return ExerciseDetailOut(
+        **to_exercise_out(e).model_dump(), gif=gif, steps=steps_of(e), target=e.target_muscle,
+        secondary=secondary_of(e), attribution=ATTRIBUTION if gif or e.media_image else None,
     )
 
 
 def find_by_name(db: Session, name: str, with_aliases: bool = True) -> Exercise | None:
-    """Exercise whose name (or alias) is `name`, accent- and case-insensitive. Names win over aliases."""
+    """Exercise whose name (or alias) is `name`, accent- and case-insensitive. Names win over aliases.
+
+    Karim's own exercises (seed, custom) win over the imported library on the same name or alias.
+    An alias shared by several library exercises ("rowing") is ambiguous: no answer, rather than a random one.
+    """
     wanted = normalize_text(name)
     exercises = list(db.scalars(select(Exercise)))
-    for e in exercises:
-        if normalize_text(e.name_fr) == wanted:
-            return e
-    if with_aliases:
-        for e in exercises:
-            if wanted in (normalize_text(a) for a in aliases_of(e)):
+    own = [e for e in exercises if not e.is_library]
+    lib = [e for e in exercises if e.is_library]
+    for group in (own, lib):
+        for e in group:
+            if normalize_text(e.name_fr) == wanted:
                 return e
+        if with_aliases:
+            hits = [e for e in group if wanted in (normalize_text(a) for a in aliases_of(e))]
+            if group is own and hits:
+                return hits[0]
+            if group is lib and len(hits) == 1:
+                return hits[0]
     return None
 
 
@@ -65,31 +84,62 @@ def add_custom_exercise(
     return exercise
 
 
-@router.get("")
-def search_exercises(
-    db: DbSession, q: str = "", muscle: str = "", equipment: str = "",
-) -> list[ExerciseOut]:
-    """Library search, accent-insensitive on name, group, equipment and aliases.
+def matches_words(words: list[str], fields: list[str]) -> bool:
+    """True when every query word STARTS a word of the fields ("velo" is not inside "developpe")."""
+    tokens = " ".join(normalize_text(f) for f in fields).split()
+    return all(any(t.startswith(w) for t in tokens) for w in words)
+
+
+def search_library(db: Session, q: str = "", muscle: str = "", equipment: str = "") -> list[Exercise]:
+    """Library search, accent-insensitive on name, group, equipment and aliases. Sorted by name.
 
     `muscle` filters on the group ("Perso" = custom exercises), `equipment` on the kind.
-    Sorted by name.
     """
     result = []
+    words = normalize_text(q).split()
+    wanted_group = normalize_text(muscle)
+    wanted_equipment = normalize_text(equipment)
     for e in db.scalars(select(Exercise)):
         if muscle:
-            wanted = normalize_text(muscle)
-            if wanted == CUSTOM_FILTER:
+            if wanted_group == CUSTOM_FILTER:
                 if not e.is_custom:
                     continue
-            elif normalize_text(e.muscle_group) != wanted:
+            elif normalize_text(e.muscle_group) != wanted_group:
                 continue
-        if equipment and normalize_text(e.equipment) != normalize_text(equipment):
+        if equipment and normalize_text(e.equipment) != wanted_equipment:
             continue
-        if q and not matches_query(q, [e.name_fr, e.muscle_group, e.equipment, *aliases_of(e)]):
+        if q and not matches_words(words, [e.name_fr, e.muscle_group, e.equipment, *aliases_of(e)]):
             continue
         result.append(e)
-    result.sort(key=lambda e: normalize_text(e.name_fr))
-    return [to_exercise_out(e) for e in result]
+    if q:  # best matches first: the phrase in the name, then all words in the name, then aliases/other fields
+        phrase = normalize_text(q)
+
+        def rank(e: Exercise) -> tuple:
+            name = normalize_text(e.name_fr)
+            tier = 0 if phrase in name else 1 if all(w in name for w in words) else 2
+            return (tier, e.is_library, name)
+
+        result.sort(key=rank)
+    else:
+        result.sort(key=lambda e: normalize_text(e.name_fr))
+    return result
+
+
+@router.get("")
+def list_exercises(
+    db: DbSession, q: str = "", muscle: str = "", equipment: str = "",
+) -> list[ExerciseOut]:
+    """The library, lean (no steps: GET /exercises/{slug} has them), optionally searched / filtered."""
+    return [to_exercise_out(e) for e in search_library(db, q, muscle, equipment)]
+
+
+@router.get("/{slug}")
+def get_exercise(slug: str, db: DbSession) -> ExerciseDetailOut:
+    """One exercise with its how-to steps, animation and muscles (the full-screen viewer)."""
+    exercise = db.get(Exercise, slug)
+    if exercise is None:
+        raise HTTPException(status_code=404, detail="Exercice inconnu")
+    return to_exercise_detail(exercise)
 
 
 @router.post("", status_code=201)

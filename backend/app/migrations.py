@@ -2,7 +2,7 @@
 
 Base.metadata.create_all() creates missing TABLES but never adds a column to a
 table that already exists. These functions add the columns introduced later
-(offline-sync `client_id`, cardio/custom exercise fields, `coach_enabled`) to
+(offline-sync `client_id`, cardio/custom exercise fields, library media, `coach_enabled`) to
 databases created before they existed. All of them are idempotent.
 """
 
@@ -19,6 +19,13 @@ NEW_COLUMNS = (
     ("exercise", "is_custom", "BOOLEAN NOT NULL DEFAULT 0"),
     ("exercise", "owner_id", "INTEGER"),
     ("exercise", "needs_review", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("exercise", "dataset_id", "VARCHAR(16)"),
+    ("exercise", "is_library", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("exercise", "media_image", "VARCHAR(160)"),
+    ("exercise", "media_gif", "VARCHAR(160)"),
+    ("exercise", "steps_fr", "TEXT NOT NULL DEFAULT ''"),
+    ("exercise", "target_muscle", "VARCHAR(60)"),
+    ("exercise", "secondary_muscles", "TEXT NOT NULL DEFAULT ''"),
     ("user_profile", "coach_enabled", "BOOLEAN NOT NULL DEFAULT 1"),
 )
 
@@ -45,3 +52,6 @@ def add_program_columns(engine: Engine) -> None:
             columns = [row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))]
             if columns and column not in columns:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        # The library import is keyed on this (same index name SQLAlchemy gives a fresh database)
+        if [row[1] for row in conn.execute(text("PRAGMA table_info(exercise)"))]:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_exercise_dataset_id ON exercise (dataset_id)"))

@@ -176,8 +176,24 @@ function render() {
     })
     .join("");
 
+  renderExerciseMedia(ex);
+
   $("prev").disabled = current === 0;
   $("next").textContent = current === last ? "Terminer" : "Suivant";
+}
+
+
+// The animation of the exercise on screen (from the snapshot: works with the PC off once cached).
+// Tap = full-screen viewer. No media (custom exercise, old snapshot) = the area stays hidden.
+function renderExerciseMedia(ex) {
+  const detail = typeof snapshotDetail === "function" ? snapshotDetail(ex.slug) : null;
+  const src = detail ? mediaUrl("videos", detail.gif) : "";
+  const box = $("ex-media");
+  box.hidden = !src;
+  box.innerHTML = src
+    ? `<button type="button" class="ex-anim" data-view="${esc(ex.slug)}" data-name="${esc(ex.name)}" aria-label="Voir l'exercice : ${esc(ex.name)}">
+         <img src="${esc(src)}" alt="Animation : ${esc(ex.name)}" width="180" height="180" decoding="async"></button>${creditLine()}`
+    : "";
 }
 
 

@@ -15,6 +15,8 @@ Personal workout + nutrition app. Full spec: `SPEC.md` (French).
 - Design (chosen 2026-10-10): direction **B "Craie & néon"** — background #0B0D0E, surface #15181A, line #2A2F33, text #F4F6F2, muted #9BA39C, lime accent #C8F031 (actions), orange #FF9F43 (protein); Barlow Condensed 800 uppercase for headings/numbers, Figtree for body; square corners, big tap targets (≥ 48 px). Mockups: scratchpad design canvas, artboards `B_*.dc.html`.
 - Prototype import is meant to be one-shot: re-importing the same file reverts edits made in the app to imported rows. The import screen must say so.
 
+- Exercise library (added 2026-10-10): `vendor/exercises-dataset` (git-ignored; data MIT, media © Gym visual, 180×180 only, attribution "© Gym visual — gymvisual.com" wherever shown, never copied into git). `backend/app/library.py` imports its 1,324 exercises at startup (idempotent, keyed on `dataset_id`, validated as untrusted input), links the seeded ones through `SEED_LINKS`, adds French search aliases, and serves the media at `/media/ex/{images|videos}/{file}`. English names, French steps. `GET /exercises` is lean, `GET /exercises/{slug}` has steps/gif/muscles, `/snapshot` carries `exercise_details` for the program only. Frontend: `exercices.js` (thumbnails, full-screen viewer, pinned offline media), media caches `salle-media-v1` (300 max) and `salle-media-pinned-v1` survive app version bumps. Coach: `search_exercises` read-only tool.
+
 ## Layout
 - `backend/` — FastAPI app (`app/`), tests (`tests/`), venv in `backend/.venv`.
 - `frontend/` — PWA (plain HTML/CSS/JS, no build step), served by FastAPI at `/app/`.

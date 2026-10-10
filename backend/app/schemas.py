@@ -91,6 +91,8 @@ class SnapshotExercise(BaseModel):
     rest_seconds: int
     is_cardio: bool = False
     cardio_unit: str | None = None
+    thumb: str | None = None   # thumbnail / animation file names (see ExerciseDetailOut)
+    gif: str | None = None
 
 
 class SnapshotSession(BaseModel):
@@ -165,6 +167,7 @@ class SnapshotOut(BaseModel):
     weights: list[WeightOut]         # last 120 days, oldest first, one per day
     progress: ProgressOut
     tips: dict[str, str]             # exercise slug → progression tip (French)
+    exercise_details: dict[str, "ExerciseDetailOut"] = {}  # the program's exercises only: viewer works offline
 
 
 class WorkoutSummaryOut(BaseModel):
@@ -298,6 +301,17 @@ class ExerciseOut(BaseModel):
     is_custom: bool
     needs_review: bool   # imported with guessed attributes; cleared by PUT /exercises/{slug}
     aliases: list[str]
+    is_library: bool = False     # imported from the big library: read-only
+    thumb: str | None = None     # thumbnail file name: /media/ex/images/{thumb}
+
+
+class ExerciseDetailOut(ExerciseOut):
+    """GET /exercises/{slug}: what the full-screen viewer shows."""
+    gif: str | None = None       # animation file name: /media/ex/videos/{gif}
+    steps: list[str] = []        # French how-to steps
+    target: str | None = None    # main muscle (French)
+    secondary: list[str] = []    # secondary muscles (French)
+    attribution: str | None = None
 
 
 class ExerciseCreateIn(BaseModel):
@@ -366,3 +380,6 @@ class RotationIn(BaseModel):
 class SessionPresetOut(BaseModel):
     id: SessionPreset
     label: str
+
+
+SnapshotOut.model_rebuild()  # resolves the forward reference to ExerciseDetailOut

@@ -208,6 +208,23 @@
     check("withoutSent works for legacy items without rev", withoutSent([{ type: "checkin", id: "c", body: {} }], { type: "checkin", id: "c", body: {} }), []);
     check("newRev is different each time", newRev() !== newRev(), true);
 
+    // --- exercise library search (searchLibrary) ---
+    const LIB = [
+      { name: "Presse à cuisses", aliases: ["leg press"], muscle_group: "Jambes", equipment: "Machine", is_library: false },
+      { name: "Lever seated fly", aliases: ["pec deck", "butterfly"], muscle_group: "Pectoraux", equipment: "Machine", is_library: true },
+      { name: "Butterfly yoga pose", aliases: [], muscle_group: "Jambes", equipment: "Poids du corps", is_library: true },
+      { name: "Dumbbell bench press", aliases: ["developpe couche"], muscle_group: "Pectoraux", equipment: "Poids libre", is_library: true },
+      { name: "Stationary bike", aliases: ["velo"], muscle_group: "Cardio", equipment: "Machine", is_library: true },
+    ];
+    const lib = (q) => searchLibrary(q, LIB.map((e) => ({ ...e }))).map((e) => e.name);
+    check("library: alias in French", lib("PRESSE à"), ["Presse à cuisses"]);
+    check("library: name match before alias match", lib("butterfly"), ["Butterfly yoga pose", "Lever seated fly"]);
+    check("library: word starts only (velo is not developpe)", lib("velo"), ["Stationary bike"]);
+    check("library: group and equipment words", lib("pectoraux machine"), ["Lever seated fly"]);
+    check("library: empty query keeps everything", lib("  ").length, 5);
+    check("library: no match", lib("zzz"), []);
+    check("library: own exercises before library ones on equal rank", lib("machine"), ["Presse à cuisses", "Lever seated fly", "Stationary bike"]);
+
     // --- labels: code points, no lone surrogates ---
     const EMOJI = "🍗";  // a chicken leg: 2 UTF-16 units, 1 character
     check("cleanLabel never cuts an emoji in two", Array.from(cleanLabel(EMOJI.repeat(100))).length, 80);

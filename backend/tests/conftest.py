@@ -9,9 +9,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app import library
 from app.database import Base, get_db
 from app.main import app
 from app.seed import seed_default_program
+
+
+@pytest.fixture(autouse=True)
+def no_vendor_dataset(monkeypatch, tmp_path_factory):
+    """Tests never read the real vendor dataset (git-ignored, 17 MB): a missing folder = no import."""
+    monkeypatch.setattr(library, "VENDOR_DIR", tmp_path_factory.getbasetemp() / "no-vendor-dataset")
 
 
 @pytest.fixture

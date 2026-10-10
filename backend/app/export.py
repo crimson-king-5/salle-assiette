@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.algorithms import KCAL_HINTS
 from app.database import DbSession
 from app.exercises import aliases_of
-from app.models import Checkin, Exercise, ProteinEntry, SessionTemplate, WeightEntry, Workout
+from app.models import Checkin, Exercise, ProteinEntry, SessionTemplate, WeightEntry, Workout, WorkoutExercise
 from app.queries import get_profile
 
 router = APIRouter(tags=["export"])
@@ -21,6 +21,10 @@ def export_data(db: DbSession) -> JSONResponse:
     """Download everything (profile, program, workouts with sets, check-ins, protein, weights)."""
     profile = get_profile(db)
     templates = db.scalars(select(SessionTemplate).order_by(SessionTemplate.position)).all()
+    # The imported library (1 300+ rows) can be re-imported from its dataset: only the ones the program
+    # or the history actually use are listed, so slugs in the file always have their exercise
+    used = {se.exercise_slug for t in templates for se in t.exercises}
+    used |= set(db.scalars(select(WorkoutExercise.exercise_slug).distinct()))
     data = {
         "app": "salle-et-assiette",
         "version": 1,
@@ -38,9 +42,10 @@ def export_data(db: DbSession) -> JSONResponse:
                 "slug": e.slug, "name": e.name_fr, "muscle_group": e.muscle_group,
                 "equipment": e.equipment, "is_isolation": e.is_isolation, "is_lower": e.is_lower,
                 "is_cardio": e.is_cardio, "cardio_unit": e.cardio_unit, "is_custom": e.is_custom,
-                "aliases": aliases_of(e),
+                "aliases": aliases_of(e), "dataset_id": e.dataset_id,
             }
             for e in db.scalars(select(Exercise).order_by(Exercise.slug))
+            if not e.is_library or e.slug in used
         ],
         "program": {
             "rotation": [t.id for t in templates],

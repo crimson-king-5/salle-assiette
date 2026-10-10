@@ -107,6 +107,7 @@ async function fetchSnapshot() {
   const startedAt = Date.now();
   rawSnapshot = await api("/snapshot");
   store.set("snapshot", rawSnapshot);
+  pinProgramMedia(rawSnapshot);  // thumbnails + animations of the program, for when the PC is off (not awaited)
   store.set("sent", getSent().filter((item) => item.sent_at > startedAt));
   offline = false;
 }
@@ -404,8 +405,8 @@ function selectSession(id) {
   $("start").disabled = !isStartable(session);
   $("exercises").innerHTML = isStartable(session)
     ? session.formats[todayFormat]
-      .map((e) => `<li><span class="name">${esc(e.name)}</span><span class="sets">${Number(e.sets)} × ${esc(e.reps)}</span></li>`)
-      .join("")
+      .map((e) => `<li>${thumbHtml(e.slug, e.name, e.thumb)}<span class="name">${esc(e.name)}</span><span class="sets">${Number(e.sets)} × ${esc(e.reps)}</span></li>`)
+      .join("") + (session.formats[todayFormat].some((e) => e.thumb) ? `<li class="credit-row">${creditLine()}</li>` : "")
     : `<li class="empty-note">Séance vide : ajoute des exercices dans Réglages</li>`;
 }
 
@@ -439,6 +440,7 @@ async function start() {
   setupAssiette();
   setupProgress();
   setupCoach();
+  setupExercices();
   setupReglages();
   setupProgramme();
   renderPending();

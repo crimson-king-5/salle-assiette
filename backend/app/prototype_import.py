@@ -218,18 +218,32 @@ class Library:
     """The exercise library loaded once, to match prototype names without scanning per name."""
 
     def __init__(self, db) -> None:
-        self.names: dict[str, str] = {}
+        self.names: dict[str, str] = {}          # Karim's own exercises
         self.aliases: dict[str, str] = {}
         self.bases: dict[str, str] = {}
-        for e in db.scalars(select(Exercise).order_by(Exercise.slug)):
+        self.library_names: dict[str, str] = {}  # imported library
+        self.library_aliases: dict[str, str | None] = {}  # None = shared by several imported exercises
+        self.library_bases: dict[str, str | None] = {}
+        for e in db.scalars(select(Exercise).order_by(Exercise.is_library, Exercise.slug)):
             self.add(e)
 
+    @staticmethod
+    def _claim(table: dict, key: str, slug: str) -> None:
+        table[key] = None if key in table else slug
+
     def add(self, e: Exercise) -> None:
-        self.names.setdefault(normalize_text(e.name_fr), e.slug)
-        self.bases.setdefault(base_name(e.name_fr), e.slug)
-        for alias in e.aliases.split("|"):
-            if alias:
-                self.aliases.setdefault(normalize_text(alias), e.slug)
+        name, base = normalize_text(e.name_fr), base_name(e.name_fr)
+        aliases = [normalize_text(a) for a in e.aliases.split("|") if a]
+        if e.is_library:  # an alias or base name shared by many library exercises must not pick one at random
+            self.library_names.setdefault(name, e.slug)
+            self._claim(self.library_bases, base, e.slug)
+            for key in aliases:
+                self._claim(self.library_aliases, key, e.slug)
+        else:
+            self.names.setdefault(name, e.slug)
+            self.bases.setdefault(base, e.slug)
+            for key in aliases:
+                self.aliases.setdefault(key, e.slug)
 
     @staticmethod
     def canonical(name: str) -> str:
@@ -239,7 +253,9 @@ class Library:
     def find(self, name: str) -> str | None:
         name = self.canonical(name)
         key = normalize_text(name)
-        return self.names.get(key) or self.aliases.get(key) or self.bases.get(base_name(name))
+        base = base_name(name)
+        return (self.names.get(key) or self.aliases.get(key) or self.library_names.get(key)
+                or self.library_aliases.get(key) or self.bases.get(base) or self.library_bases.get(base))
 
 
 async def read_limited_json(request: Request) -> Any:
