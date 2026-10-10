@@ -400,3 +400,25 @@ dialog::backdrop { background: rgb(0 0 0 / 0.55); }
   color: var(--ink);
   font-size: 0.9rem;
 }
+
+/* Sync indicator: discreet, only shown when something is waiting for the PC */
+.pending {
+  margin: -8px 0 16px;
+  font-size: 0.8rem;
+  color: var(--muted, var(--ink));
+  opacity: 0.8;
+}
+
+/* Items the server refused for good: tap to see them and delete */
+.rejected {
+  display: block;
+  margin: -8px 0 16px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 0;
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+}

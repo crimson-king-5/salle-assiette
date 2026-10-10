@@ -10,11 +10,13 @@ Personal workout + nutrition app. Full spec: `SPEC.md` (French).
 - Offline: Karim won't keep the PC on 24/7, so the PWA must work with the PC off and sync later. Done: Tailscale HTTPS + install, `/snapshot` cached on the phone. Next: local-first workout (client UUID + idempotent `PUT /workouts/{id}`), offline check-in (JS port of `compute_readiness`, kept in sync with the Python one). Program editing stays online-only.
 - Hosting: the PC is the server, reached through Tailscale. `tailscale serve --bg 8001` → https://desktop-m7c8gnc.tail696942.ts.net (tailnet only, no app login needed). `start-server.ps1` = production run on 127.0.0.1:8001.
 - Don't over-design: every step must end with something runnable and tested.
+- Decided 2026-10-10: build the whole spec. Order: offline workout/check-in → nutrition (Assiette) → progress + settings + program editor → AI coach (Anthropic API; Karim provides the key in `backend/.env`, never committed) → daily Telegram notification (Karim creates the bot via @BotFather; token + chat id in `backend/.env`).
 
 ## Layout
 - `backend/` — FastAPI app (`app/`), tests (`tests/`), venv in `backend/.venv`.
 - `frontend/` — PWA (plain HTML/CSS/JS, no build step), served by FastAPI at `/app/`.
-- Dev server: `.claude/launch.json` → port 8001 (8000 is taken by another app), host 0.0.0.0 so the phone can reach it on the LAN.
+- Dev server: `.claude/launch.json` → 127.0.0.1:8001 (8000 is taken by another app). The phone reaches it only through Tailscale; `TrustedHostMiddleware` allows localhost, 127.0.0.1, the ts.net name and `testserver`.
+- `backend/salle.db` holds Karim's real data: agents must never write test data into it (tests use in-memory DBs; scratch runs use a copy). Starting the real server runs the startup migrations on it — that's intended.
 
 ## Commands (from `backend/`)
 - Run tests: `.venv\Scripts\python -m pytest`

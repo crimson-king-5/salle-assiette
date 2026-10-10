@@ -20,6 +20,8 @@
     </header>
 
     <p id="offline" class="offline" role="status" hidden></p>
+    <p id="pending" class="pending" role="status" hidden></p>
+    <button type="button" id="rejected" class="rejected" hidden></button>
 
     <!-- A workout was left in progress: offer to resume it -->
     <section id="resume" class="card hero" data-level="vert" hidden>
@@ -92,6 +94,7 @@
     <div id="dialog-actions" class="dialog-actions"></div>
   </dialog>
 
+  <script src="logic.js"></script>
   <script src="workout.js"></script>
   <script src="app.js"></script>
 </body>

@@ -35,7 +35,10 @@ class PlannedExercise:
 def compute_readiness(
     energy: int, sleep: int, motivation: int, soreness: int, minutes: int
 ) -> Readiness:
-    """Traffic-light readiness from the morning check-in (SPEC §5.1)."""
+    """Traffic-light readiness from the morning check-in (SPEC §5.1).
+
+    KEEP IN SYNC with computeReadiness() in frontend/logic.js (offline check-in).
+    """
     for name, value in [("energy", energy), ("sleep", sleep),
                         ("motivation", motivation), ("soreness", soreness)]:
         if value not in ANSWER_VALUES:
@@ -110,6 +113,8 @@ def tonnage(sets: list[LoggedSet]) -> float:
 
     Only validated sets count. A set with no weight or no reps
     (e.g. a bodyweight exercise) counts for 0.
+
+    KEEP IN SYNC with tonnage() in frontend/logic.js (offline workout recap).
     """
     total = 0
     for s in sets:

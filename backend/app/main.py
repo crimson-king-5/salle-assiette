@@ -2,16 +2,19 @@ import datetime as dt
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.algorithms import Format, apply_format, compute_readiness
 from app.database import Base, DbSession, SessionLocal, engine
 from app.models import Checkin, SessionTemplate, to_planned
 from app.queries import next_session_id, today_checkin
-from app.schemas import CheckinIn, CheckinOut, SessionOut
+from app.migrations import add_client_id_columns
+from app.schemas import CheckinIn, CheckinOut, CheckinSyncIn, ClientId, SessionOut, SyncOut
 from app.seed import seed_default_program
 from app.snapshot import router as snapshot_router
 from app.workouts import router as workouts_router
@@ -24,12 +27,19 @@ async def lifespan(app: FastAPI):
     # On startup: create the tables if they don't exist yet,
     # and insert the default program on first run.
     Base.metadata.create_all(engine)
+    add_client_id_columns(engine)  # old salle.db files lack the offline-sync columns
     with SessionLocal() as db:
         seed_default_program(db)
     yield
 
 
 app = FastAPI(title="Salle & Assiette", lifespan=lifespan)
+
+# The server only listens on 127.0.0.1 (Tailscale forwards to it), so only these Host
+# headers are legitimate. Anything else (DNS rebinding, a stray LAN client) gets 400.
+# "testserver" is the host name used by pytest's TestClient.
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "desktop-m7c8gnc.tail696942.ts.net", "testserver"]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 app.include_router(workouts_router)
 app.include_router(snapshot_router)
 
@@ -81,6 +91,41 @@ def create_checkin(checkin: CheckinIn, db: DbSession) -> CheckinOut:
     db.add(row)
     db.commit()
     return CheckinOut(score=result.score, level=result.level, format=result.format )
+
+
+@app.put("/checkins/{client_id}")
+def sync_checkin(client_id: ClientId, body: CheckinSyncIn, db: DbSession, response: Response) -> SyncOut:
+    """Offline sync: store a check-in made on the phone. Idempotent (same UUID → replaced).
+
+    The traffic light is recomputed here from the 5 answers; the phone's own
+    result is never trusted.
+    """
+    result = compute_readiness(
+        energy=body.energy, sleep=body.sleep, motivation=body.motivation,
+        soreness=body.soreness, minutes=body.minutes,
+    )
+    key = str(client_id)
+    for attempt in (1, 2):
+        row = db.scalars(select(Checkin).where(Checkin.client_id == key)).first()
+        created = row is None
+        if created:
+            row = Checkin(client_id=key)
+            db.add(row)
+        row.date = body.date
+        row.created_at = body.created_at
+        row.energy, row.sleep, row.motivation = body.energy, body.sleep, body.motivation
+        row.soreness, row.minutes = body.soreness, body.minutes
+        row.score, row.level, row.format = result.score, result.level, result.format
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()  # same client_id inserted at once by another request: retry as update
+            if not created or attempt == 2:
+                raise
+
+    response.status_code = 201 if created else 200
+    return SyncOut(id=row.id, created=created)
 
 
 @app.get("/checkin/today")

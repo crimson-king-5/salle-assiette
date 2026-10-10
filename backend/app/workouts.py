@@ -8,12 +8,14 @@ import datetime as dt
 
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.algorithms import LoggedSet, apply_format, rest_seconds, tonnage
 from app.database import DbSession
-from app.models import SessionTemplate, Workout, WorkoutExercise, WorkoutSet, to_planned
+from app.models import Exercise, SessionTemplate, Workout, WorkoutExercise, WorkoutSet, to_planned
 from app.schemas import (
-    SetOut, SetUpdateIn, WorkoutExerciseOut, WorkoutOut, WorkoutStartIn, WorkoutSummaryOut,
+    ClientId, SetOut, SetUpdateIn, SyncOut, WorkoutExerciseOut, WorkoutOut, WorkoutStartIn,
+    WorkoutSummaryOut, WorkoutSyncIn,
 )
 
 router = APIRouter(prefix="/workouts", tags=["workouts"])
@@ -105,6 +107,58 @@ def start_workout(body: WorkoutStartIn, db: DbSession) -> WorkoutOut:
     db.add(workout)
     db.commit()
     return to_out(db, workout)
+
+
+@router.put("/{client_id}")
+def sync_workout(client_id: ClientId, body: WorkoutSyncIn, db: DbSession, response: Response) -> SyncOut:
+    """Offline sync: store a finished workout made on the phone.
+
+    Idempotent: the phone's UUID identifies the workout. Unknown → created (201);
+    already there → its fields, exercises and sets are replaced (200). Sending
+    the same document twice never duplicates anything.
+    """
+    known = set(db.scalars(select(Exercise.slug)).all())
+    for ex in body.exercises:
+        if ex.slug not in known:
+            raise HTTPException(status_code=422, detail=f"Exercice inconnu : {ex.slug}")
+
+    key = str(client_id)
+    for attempt in (1, 2):
+        exercises = [
+            WorkoutExercise(
+                position=i, exercise_slug=ex.slug, target_reps=ex.target_reps,
+                sets=[
+                    WorkoutSet(position=n, weight=s.weight, reps=s.reps, done=s.done)
+                    for n, s in enumerate(ex.sets)
+                ],
+            )
+            for i, ex in enumerate(body.exercises)
+        ]
+        workout = db.scalars(select(Workout).where(Workout.client_id == key)).first()
+        created = workout is None
+        if created:
+            workout = Workout(client_id=key)
+            db.add(workout)
+        workout.session_id = body.session_id
+        workout.name = body.name
+        workout.focus = body.focus
+        workout.format = body.format
+        workout.date = body.date
+        workout.started_at = body.started_at
+        workout.finished_at = body.finished_at
+        workout.exercises = exercises  # old ones (if any) are deleted: delete-orphan
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            # Two requests inserted the same client_id at once: the other one won,
+            # so start over and update its row instead.
+            db.rollback()
+            if not created or attempt == 2:
+                raise
+
+    response.status_code = 201 if created else 200
+    return SyncOut(id=workout.id, created=created)
 
 
 @router.get("/current")

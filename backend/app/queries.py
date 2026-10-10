@@ -9,9 +9,13 @@ from app.models import Checkin, SessionTemplate, Workout, WorkoutExercise, Worko
 
 
 def today_checkin(db: Session) -> Checkin | None:
-    """Today's latest check-in (a redone check-in replaces the earlier one)."""
+    """Today's latest check-in (a redone check-in replaces the earlier one).
+
+    Sorted by created_at first: a check-in made offline can reach the server late.
+    """
     return db.scalars(
-        select(Checkin).where(Checkin.date == dt.date.today()).order_by(Checkin.id.desc())
+        select(Checkin).where(Checkin.date == dt.date.today())
+        .order_by(Checkin.created_at.desc(), Checkin.id.desc())
     ).first()
 
 

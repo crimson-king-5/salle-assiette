@@ -1,6 +1,9 @@
 // Salle & Assiette — "Aujourd'hui" screen.
 // Talks to the FastAPI backend, served from the same address.
 // Offline: works from the last snapshot saved on the phone (GET /snapshot).
+// Finished workouts and check-ins go into an outbox (localStorage) and are sent
+// with idempotent PUTs whenever the PC answers (see syncOutbox).
+// Pure helpers (computeReadiness, tonnage, dates, newId, esc) live in logic.js.
 
 const QUESTIONS = [
   { field: "energy", label: "Énergie", emojis: ["🪫", "🙂", "⚡"] },
@@ -8,13 +11,14 @@ const QUESTIONS = [
   { field: "motivation", label: "Motivation", emojis: ["🥱", "🙂", "🔥"] },
   { field: "soreness", label: "Courbatures", emojis: ["😌", "😬", "🤕"] },
 ];
-const VALUES = [1, 3, 5]; // what each of the 3 buttons is worth (see algorithms.py)
+const VALUES = ANSWER_VALUES; // what each of the 3 buttons is worth (see logic.js / algorithms.py)
 
 const LEVEL_TEXT = { vert: "🟢 Feu vert", orange: "🟠 Feu orange", rouge: "🔴 Feu rouge" };
 
 const answers = {};       // filled as buttons are tapped: { energy: 5, sleep: 3, … }
 let todayFormat = null;   // "complete" | "minimale" | "express"
-let snapshot = null;      // everything needed offline, see GET /snapshot
+let rawSnapshot = null;   // GET /snapshot exactly as the server sent it (this is what gets saved)
+let snapshot = null;      // rawSnapshot + what is still waiting in the outbox (see withPending)
 let offline = false;      // true when the PC can't be reached
 let selectedSession = null;  // id of the session chosen on the hero card
 
@@ -43,7 +47,12 @@ const store = {
     try { return JSON.parse(localStorage.getItem(`salle.${key}`)); } catch { return null; }
   },
   set(key, value) {
-    try { localStorage.setItem(`salle.${key}`, JSON.stringify(value)); } catch { /* ignore */ }
+    // true when saved. false when storage is full or blocked: callers that must not lose
+    // data (outbox, finishing a workout) check it.
+    try { localStorage.setItem(`salle.${key}`, JSON.stringify(value)); return true; } catch { return false; }
+  },
+  remove(key) {
+    try { localStorage.removeItem(`salle.${key}`); } catch { /* ignore */ }
   },
 };
 
@@ -55,6 +64,8 @@ class OfflineError extends Error {
 }
 
 async function api(path, options = {}) {
+  // strict: a 404 is an error like any other (default: 404/204 -> null, "nothing there")
+  const { strict, ...init } = options;
   // Give up after 5 s: when the PC is off, a request can hang for a long time.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
@@ -63,15 +74,19 @@ async function api(path, options = {}) {
     response = await fetch(path, {
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
-      ...options,
+      ...init,
     });
   } catch {
     throw new OfflineError();  // no answer at all: network down or PC off
   } finally {
     clearTimeout(timer);
   }
-  if (response.status === 404 || response.status === 204) return null;
-  if (!response.ok) throw new Error(`Erreur serveur (${response.status})`);
+  if (!strict && (response.status === 404 || response.status === 204)) return null;
+  if (!response.ok) {
+    const error = new Error(`Erreur serveur (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -82,20 +97,32 @@ function showError(error) {
   $("error").hidden = false;
 }
 
-function isToday(isoDate) {
-  return isoDate && isoDate.slice(0, 10) === new Date().toLocaleDateString("sv");  // "2026-09-27"
+// Fetch /snapshot and keep it. `fetchedAt` is the phone's clock when the request started: any
+// item sent before that moment is inside this snapshot, so its temporary overlay can go.
+async function fetchSnapshot() {
+  const startedAt = Date.now();
+  rawSnapshot = await api("/snapshot");
+  store.set("snapshot", rawSnapshot);
+  store.set("sent", getSent().filter((item) => item.sent_at > startedAt));
+  offline = false;
 }
 
 async function loadSnapshot() {
   try {
-    snapshot = await api("/snapshot");
-    store.set("snapshot", snapshot);
-    offline = false;
+    await fetchSnapshot();
   } catch (error) {
     if (!(error instanceof OfflineError)) throw error;
-    snapshot = store.get("snapshot");
+    rawSnapshot = store.get("snapshot");
     offline = true;
   }
+  rebuildSnapshot();
+  renderBanner();
+  if (!offline) {
+    await syncOutbox();  // send what is waiting BEFORE showing anything, so the screen is up to date
+  }
+}
+
+function renderBanner() {
   $("offline").hidden = !offline;
   if (offline && snapshot) {
     const when = new Date(snapshot.generated_at).toLocaleString("fr-FR", {
@@ -103,6 +130,141 @@ async function loadSnapshot() {
     });
     $("offline").textContent = `📴 Hors ligne · ton programme tel qu'il était ${when}`;
   }
+}
+
+
+// --- Outbox: finished workouts and check-ins waiting to reach the server ---
+// Each item: { type: "workout" | "checkin", id: <uuid>, body: <document for the PUT> }
+// Three lists in localStorage:
+//   outbox   -> not sent yet (shown as "en attente de synchro", overlaid on the snapshot)
+//   sent     -> accepted by the server (2xx) but not yet inside a snapshot we hold; still overlaid
+//               (each has sent_at = phone clock in ms) until a snapshot fetched later replaces it
+//   rejected -> refused for good by the server (422...): never overlaid, shown for deletion
+
+function getList(key) {
+  const list = store.get(key);
+  return Array.isArray(list) ? list : [];
+}
+const getOutbox = () => getList("outbox");
+const getSent = () => getList("sent");
+const getRejected = () => getList("rejected");
+
+function enqueue(type, id, body) {
+  // Same id twice (e.g. a crash between two saves) -> keep only the latest copy
+  const box = getOutbox().filter((item) => !(item.type === type && item.id === id));
+  box.push({ type, id, body });
+  const saved = store.set("outbox", box);  // false = phone storage full: caller must not lose the data
+  renderPending();
+  return saved;
+}
+
+function renderPending() {
+  const n = getOutbox().length;
+  $("pending").hidden = n === 0;
+  $("pending").textContent = `☁️ ${n} élément${n > 1 ? "s" : ""} en attente de synchro`;
+
+  const r = getRejected().length;
+  $("rejected").hidden = r === 0;
+  $("rejected").textContent = `⚠️ ${r} élément${r > 1 ? "s" : ""} refusé${r > 1 ? "s" : ""} par le serveur`;
+}
+
+function describeItem(item) {
+  const b = item.body || {};
+  return item.type === "workout" ? `Séance ${b.name ?? ""} du ${b.date ?? "?"}` : `Check-in du ${b.date ?? "?"}`;
+}
+
+async function showRejected() {
+  // One "Supprimer" per item; the dialog is redrawn after each deletion
+  let again = true;
+  while (again) {
+    again = false;
+    const items = getRejected();
+    if (items.length === 0) break;
+    const list = items.map((i) => `<li>${esc(describeItem(i))} <small>(erreur ${Number(i.status)})</small> `
+      + `<button type="button" class="danger small" data-key="${esc(`${i.type}|${i.id}`)}">Supprimer</button></li>`).join("");
+    const shown = showDialog(
+      `<h2>Refusé par le serveur</h2><p class="muted">Ces éléments n'ont pas pu être enregistrés et ne le seront jamais.</p><ul>${list}</ul>`,
+      [{ label: "Fermer", value: null }],
+    );
+    $("dialog-body").onclick = (event) => {
+      const button = event.target.closest("button[data-key]");
+      if (!button) return;
+      store.set("rejected", getRejected().filter((i) => `${i.type}|${i.id}` !== button.dataset.key));
+      again = true;
+      $("dialog").close();  // resolves showDialog; the loop redraws with what is left
+    };
+    await shown;
+    $("dialog-body").onclick = null;
+    renderPending();
+  }
+}
+
+let syncing = false;
+let syncAgain = false;
+
+function moveItem(item, toKey, extra) {
+  // Write the destination first, then remove from the outbox: a failure in between
+  // only means a harmless re-send later (PUT is idempotent).
+  const target = getList(toKey).filter((i) => !(i.type === item.type && i.id === item.id));
+  target.push({ ...item, ...extra });
+  if (!store.set(toKey, target)) return false;
+  store.set("outbox", getOutbox().filter((i) => !(i.type === item.type && i.id === item.id)));
+  return true;
+}
+
+async function syncOutbox() {
+  if (syncing) {
+    syncAgain = true;  // something was queued meanwhile: one more pass when this one ends
+    return;
+  }
+  syncing = true;
+  try {
+    do {
+      syncAgain = false;
+      let sent = 0;
+      let stop = false;
+      for (const item of getOutbox()) {
+        const path = `/${item.type === "workout" ? "workouts" : "checkins"}/${item.id}`;
+        try {
+          await api(path, { method: "PUT", body: JSON.stringify(item.body), strict: true });
+        } catch (error) {
+          if (error instanceof OfflineError) { stop = true; break; }  // PC gone again: retry later
+          const status = error.status;
+          if (status === 404 || status === 405) { stop = true; break; }  // server too old: keep everything
+          const transient = [400, 401, 403, 408, 429].includes(status);
+          if (status >= 400 && status < 500 && !transient) {
+            moveItem(item, "rejected", { status });  // refused for good
+          }
+          continue;  // 5xx / transient: keep it, try the others
+        }
+        if (moveItem(item, "sent", { sent_at: Date.now() })) sent++;
+      }
+      if (sent > 0) {
+        try {  // fresh next session, last weights and week count (also drops the "sent" overlays)
+          await fetchSnapshot();
+        } catch { /* keep overlaying "sent" items until a snapshot arrives */ }
+        renderBanner();
+      }
+      rebuildSnapshot();  // also when items were rejected: they must stop being overlaid
+      renderPending();
+      if (stop) break;
+    } while (syncAgain);
+  } finally {
+    syncing = false;
+    renderPending();
+  }
+}
+
+
+// --- Snapshot + outbox: what the phone shows while the PC doesn't know yet ---
+
+function withPending(raw) {
+  // The maths is in logic.js (applyPending) so selftest.html can check it
+  return applyPending(raw, getOutbox(), getSent(), localDate(new Date()));
+}
+
+function rebuildSnapshot() {
+  snapshot = withPending(rawSnapshot);
 }
 
 
@@ -131,13 +293,26 @@ function onChoiceTap(event) {
   $("submit").disabled = Object.keys(answers).length < 5;
 }
 
-async function submitCheckin() {
+function submitCheckin() {
+  // Works with the PC off: compute here, queue it, show the result right away.
   $("submit").disabled = true;
   try {
-    const result = await api("/checkin", { method: "POST", body: JSON.stringify(answers) });
-    snapshot.checkin_today = result;  // keep the saved copy up to date
-    store.set("snapshot", snapshot);
+    const { energy, sleep, motivation, soreness, minutes } = answers;
+    const result = computeReadiness(energy, sleep, motivation, soreness, minutes);
+    const now = new Date();
+    const saved = enqueue("checkin", newId(), {
+      energy, sleep, motivation, soreness, minutes,
+      date: localDate(now), created_at: localIso(now),
+    });
+    if (!saved) {
+      $("error").textContent = "Stockage du téléphone plein ou bloqué : check-in non enregistré.";
+      $("error").hidden = false;
+      $("submit").disabled = false;
+      return;
+    }
+    rebuildSnapshot();  // the queued check-in is now "today's check-in"
     showResult(result);
+    syncOutbox();  // not awaited: sends it now if the PC is on
   } catch (error) {
     showError(error);
     $("submit").disabled = false;
@@ -162,7 +337,7 @@ function showResult(result) {
   $("format").textContent = formatLabel(result.format);
 
   $("sessions").innerHTML = snapshot.sessions
-    .map((s) => `<button type="button" data-id="${s.id}">${s.name}</button>`)
+    .map((s) => `<button type="button" data-id="${esc(s.id)}">${esc(s.name)}</button>`)
     .join("");
 
   $("checkin").hidden = true;
@@ -177,7 +352,7 @@ function selectSession(id) {
   });
   const session = snapshot.sessions.find((s) => s.id === id);
   $("exercises").innerHTML = session.formats[todayFormat]
-    .map((e) => `<li><span class="name">${e.name}</span><span class="sets">${e.sets} × ${e.reps}</span></li>`)
+    .map((e) => `<li><span class="name">${esc(e.name)}</span><span class="sets">${Number(e.sets)} × ${esc(e.reps)}</span></li>`)
     .join("");
 }
 
@@ -197,14 +372,35 @@ async function start() {
     if (button) selectSession(button.dataset.id);
   });
   $("start").addEventListener("click", () => startWorkout(selectedSession));
-  $("resume-btn").addEventListener("click", () => resumeWorkout().catch(showError));
+  $("resume-btn").addEventListener("click", resumeWorkout);
+  window.addEventListener("online", () => { syncOutbox(); });
+  $("rejected").addEventListener("click", () => showRejected());
+  // App left open past midnight: "today" changed, redraw from scratch
+  let shownDay = localDate(new Date());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || localDate(new Date()) === shownDay) return;
+    shownDay = localDate(new Date());
+    if ($("workout").hidden) showToday();
+  });
   setupWorkout();
+  renderPending();
   await showToday();
 }
 
 async function showToday() {
   $("error").hidden = true;
   try {
+    // A workout left in progress (saved on the phone) comes first: "Reprendre"
+    const inProgress = loadLocalWorkout();
+    $("resume").hidden = !inProgress;
+    if (inProgress) {
+      $("resume-name").textContent = inProgress.name;
+      $("checkin").hidden = true;
+      $("result").hidden = true;
+      loadSnapshot().catch(() => { });  // still refresh the saved copy and sync, in the background
+      return;
+    }
+
     await loadSnapshot();
     if (!snapshot) {
       $("error").textContent = "📴 PC injoignable, et aucune copie sur ce téléphone. "
@@ -213,18 +409,9 @@ async function showToday() {
       return;
     }
 
-    // A workout left in progress comes first: "Reprendre"
-    const inProgress = offline ? null : await api("/workouts/current");
-    $("resume").hidden = !inProgress;
-    if (inProgress) {
-      $("resume-name").textContent = inProgress.name;
-      $("checkin").hidden = true;
-      $("result").hidden = true;
-      return;
-    }
-
     // A check-in saved in yesterday's snapshot doesn't count for today
-    const checkin = isToday(snapshot.generated_at) ? snapshot.checkin_today : null;
+    const checkinDay = snapshot.checkin_date ?? snapshot.generated_at.slice(0, 10);
+    const checkin = checkinDay === localDate(new Date()) ? snapshot.checkin_today : null;
     if (checkin) showResult(checkin);
     else showCheckin();
   } catch (error) {

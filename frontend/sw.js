@@ -3,9 +3,9 @@
 // the PC answers, the saved copy otherwise. API calls are not touched here:
 // app.js handles them (timeout + snapshot saved on the phone).
 
-const CACHE = "salle-v4";  // bump when the file list changes
+const CACHE = "salle-v7";  // bump when the file list changes
 const SHELL = [
-  "./", "style.css", "app.js", "workout.js", "manifest.webmanifest",
+  "./", "style.css", "logic.js", "app.js", "workout.js", "manifest.webmanifest",
   "icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-192.png", "icon-maskable-512.png",
 ];
 const NETWORK_TIMEOUT_MS = 3000;

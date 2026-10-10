@@ -70,3 +70,10 @@ def test_today_returns_latest_checkin(client):
     response = client.get("/checkin/today")
     assert response.status_code == 200
     assert response.json()["level"] == "vert"
+
+
+def test_offline_logic_is_loaded_and_cached_but_selftest_is_not(client):
+    assert '<script src="logic.js">' in client.get("/app/").text
+    sw = client.get("/app/sw.js").text
+    assert '"logic.js"' in sw
+    assert "selftest" not in sw

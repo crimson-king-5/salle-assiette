@@ -1,8 +1,17 @@
 // "Séance" screen (SPEC §4.2): one exercise at a time,
 // 1-tap set validation, automatic rest timer, end-of-workout recap.
-// Uses $, api, showError and todayFormat from app.js.
+// Local-first: the workout lives in localStorage ("salle.workout") and every tap is
+// saved there at once, no network. Only when it is FINISHED does it go to the outbox
+// (see app.js) and get sent to the server with an idempotent PUT.
+// Uses $, store, snapshot, enqueue, syncOutbox, showError, todayFormat from app.js
+// and tonnage, newId, localDate, localIso, esc from logic.js.
+//
+// Shape of `workout`:
+//   { id, session_id, name, focus, format, date, started_at,
+//     exercises: [{ slug, name, target_reps, rest_seconds, last_weight,
+//                   sets: [{ weight, reps, done }] }] }
 
-let workout = null;     // the workout in progress, as sent by GET /workouts/current
+let workout = null;     // the workout in progress
 let current = 0;        // index of the exercise on screen
 let chronoTimer = null;
 let restTimer = null;
@@ -20,6 +29,11 @@ function topOfRange(reps) {
 function mmss(totalSeconds) {
   const s = Math.max(0, Math.round(totalSeconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function numText(value) {
+  // A number (or nothing) as text, safe inside an HTML attribute
+  return value == null || !Number.isFinite(Number(value)) ? "" : String(Number(value));
 }
 
 function showDialog(html, buttons) {
@@ -42,24 +56,60 @@ function showDialog(html, buttons) {
 }
 
 
-// --- Open / close workout mode ---
+// --- The workout saved on the phone ---
 
-async function startWorkout(sessionId) {
-  try {
-    workout = await api("/workouts", {
-      method: "POST",
-      body: JSON.stringify({ session_id: sessionId, format: todayFormat }),
-    });
-    current = 0;
-    openWorkout();
-  } catch (error) {
-    showError(error);
-  }
+function saveWorkout() {
+  store.set("workout", workout);
 }
 
-async function resumeWorkout() {
-  workout = await api("/workouts/current");
-  if (!workout) return;
+function loadLocalWorkout() {
+  // The in-progress workout, if any (and if the saved data looks sane)
+  const saved = store.get("workout");
+  const valid = saved && typeof saved.id === "string" && typeof saved.name === "string"
+    && Array.isArray(saved.exercises) && saved.exercises.length > 0
+    && saved.exercises.every((e) => e && Array.isArray(e.sets));
+  return valid ? saved : null;
+}
+
+
+// --- Open / close workout mode ---
+
+function startWorkout(sessionId) {
+  const session = snapshot && snapshot.sessions.find((s) => s.id === sessionId);
+  const planned = session && session.formats[todayFormat];
+  if (!planned) {
+    showError(new Error("Séance introuvable sur ce téléphone"));
+    return;
+  }
+  const now = new Date();
+  workout = {
+    id: newId(),
+    session_id: session.id,
+    name: session.name,
+    focus: session.focus,
+    format: todayFormat,
+    date: localDate(now),
+    started_at: localIso(now),
+    exercises: planned.map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      target_reps: p.reps,
+      rest_seconds: p.rest_seconds,
+      last_weight: snapshot.last_weights[p.slug] ?? null,  // prefill
+      sets: Array.from({ length: p.sets }, () => ({ weight: null, reps: null, done: false })),
+    })),
+  };
+  saveWorkout();
+  current = 0;
+  openWorkout();
+}
+
+function resumeWorkout() {
+  workout = loadLocalWorkout();
+  if (!workout) {
+    showToday();
+    return;
+  }
   // Land on the first exercise that still has sets to do
   const firstUnfinished = workout.exercises.findIndex((e) => e.sets.some((s) => !s.done));
   current = firstUnfinished === -1 ? workout.exercises.length - 1 : firstUnfinished;
@@ -72,6 +122,7 @@ function openWorkout() {
   $("w-name").textContent = workout.name;
   const startedAt = new Date(workout.started_at).getTime();
   const tick = () => { $("chrono").textContent = mmss((Date.now() - startedAt) / 1000); };
+  clearInterval(chronoTimer);
   tick();
   chronoTimer = setInterval(tick, 1000);
   render();
@@ -96,7 +147,7 @@ function render() {
     .map((e, i) => {
       const done = e.sets.every((s) => s.done);
       const cls = i === current ? "current" : done ? "done" : "";
-      return `<button type="button" class="${cls}" data-index="${i}" aria-label="Exercice ${i + 1} : ${e.name}"><span></span></button>`;
+      return `<button type="button" class="${cls}" data-index="${i}" aria-label="Exercice ${i + 1} : ${esc(e.name)}"><span></span></button>`;
     })
     .join("");
 
@@ -106,12 +157,12 @@ function render() {
 
   $("sets").innerHTML = ex.sets
     .map((s, i) => {
-      const weightHint = (i > 0 && ex.sets[i - 1].weight) || ex.last_weight || "kg";
+      const weightHint = numText((i > 0 && ex.sets[i - 1].weight) || ex.last_weight) || "kg";
       return `
       <div class="set-row ${s.done ? "done" : ""}" data-index="${i}">
         <span class="set-num">${i + 1}</span>
-        <label><input type="text" inputmode="decimal" data-field="weight" value="${s.weight ?? ""}" placeholder="${weightHint}" aria-label="Série ${i + 1}, kilos"><small>kg</small></label>
-        <label><input type="text" inputmode="numeric" data-field="reps" value="${s.reps ?? ""}" placeholder="${topOfRange(ex.target_reps) ?? ""}" aria-label="Série ${i + 1}, répétitions"><small>reps</small></label>
+        <label><input type="text" inputmode="decimal" data-field="weight" value="${numText(s.weight)}" placeholder="${weightHint}" aria-label="Série ${i + 1}, kilos"><small>kg</small></label>
+        <label><input type="text" inputmode="numeric" data-field="reps" value="${numText(s.reps)}" placeholder="${numText(topOfRange(ex.target_reps))}" aria-label="Série ${i + 1}, répétitions"><small>reps</small></label>
         <button type="button" class="check">${s.done ? "✓" : "Valider"}</button>
       </div>`;
     })
@@ -125,41 +176,36 @@ function render() {
 // --- Sets: typing and 1-tap validation ---
 
 function onSetInput(event) {
-  // Keep what's typed, so it survives a re-render
+  // Keep what's typed, so it survives a re-render (and an app restart)
   const input = event.target.closest("input");
   if (!input) return;
   const set = workout.exercises[current].sets[input.closest(".set-row").dataset.index];
-  const value = input.value.replace(",", ".");
-  set[input.dataset.field] = value === "" ? null : Number(value);
+  const value = input.value.replace(",", ".").trim();
+  const number = Number(value);
+  set[input.dataset.field] = value === "" || !Number.isFinite(number) ? null : number;
+  saveWorkout();
 }
 
-async function onSetTap(event) {
+function onSetTap(event) {
   const button = event.target.closest(".check");
   if (!button) return;
   const i = Number(button.closest(".set-row").dataset.index);
   const ex = workout.exercises[current];
   const set = ex.sets[i];
 
-  let body;
   if (set.done) {
-    body = { weight: set.weight, reps: set.reps, done: false };  // re-tap = un-validate
+    set.done = false;  // re-tap = un-validate
   } else {
     // Empty validation: last known weight and top of the rep range (SPEC §4.2)
-    const weight = set.weight ?? (i > 0 ? ex.sets[i - 1].weight : null) ?? ex.last_weight;
-    const reps = set.reps ?? topOfRange(ex.target_reps);
-    body = { weight, reps, done: true };
-  }
-
-  try {
-    const saved = await api(`/workouts/sets/${set.id}`, { method: "PATCH", body: JSON.stringify(body) });
-    Object.assign(set, saved);
+    set.weight = set.weight ?? (i > 0 ? ex.sets[i - 1].weight : null) ?? ex.last_weight ?? null;
+    set.reps = set.reps ?? topOfRange(ex.target_reps);
+    set.done = true;
     const next = ex.sets[i + 1];
-    if (saved.done && next && !next.done && next.weight == null) next.weight = saved.weight;  // carry the weight over
-    render();
-    if (saved.done) startRest(ex.rest_seconds);
-  } catch (error) {
-    showError(error);
+    if (next && !next.done && next.weight == null) next.weight = set.weight;  // carry the weight over
   }
+  saveWorkout();
+  render();
+  if (set.done) startRest(ex.rest_seconds);
 }
 
 
@@ -195,6 +241,13 @@ function goTo(index) {
   window.scrollTo(0, 0);
 }
 
+function cleanSet(s) {
+  // Same limits as the server (0-500 kg, 0-100 reps): a refused workout would never sync
+  const weight = s.weight != null && Number.isFinite(s.weight) ? Math.min(500, Math.max(0, s.weight)) : null;
+  const reps = s.reps != null && Number.isFinite(s.reps) ? Math.min(100, Math.max(0, Math.round(s.reps))) : null;
+  return { weight, reps, done: s.done === true };
+}
+
 async function finishWorkout() {
   const left = workout.exercises.flatMap((e) => e.sets).filter((s) => !s.done).length;
   if (left > 0) {
@@ -204,25 +257,64 @@ async function finishWorkout() {
     );
     if (!ok) return;
   }
-  try {
-    const summary = await api(`/workouts/${workout.id}/finish`, { method: "POST" });
-    const goalReached = summary.week_count === summary.week_goal;
-    await showDialog(`
-      <p class="big-emoji">${goalReached ? "🏆" : "✅"}</p>
-      <h2>${goalReached ? "Objectif de la semaine atteint !" : "Séance terminée"}</h2>
-      <dl class="recap">
-        <div><dt>Séries</dt><dd>${summary.sets_done}</dd></div>
-        <div><dt>Tonnage</dt><dd>${Math.round(summary.tonnage)} kg</dd></div>
-        <div><dt>Durée</dt><dd>${summary.duration_min} min</dd></div>
-        <div><dt>Semaine</dt><dd>${summary.week_count}/${summary.week_goal}</dd></div>
-      </dl>`,
-      [{ label: "Fermer", value: true, className: "primary" }],
+
+  // The recap is computed here, no server needed
+  const finishedAt = new Date();
+  const doc = {
+    session_id: workout.session_id,
+    name: workout.name,
+    focus: workout.focus,
+    format: workout.format,
+    date: workout.date,
+    started_at: workout.started_at,
+    // never before started_at (phone clock jumped back: DST, manual fix); the server clamps too
+    finished_at: localIso(new Date(Math.max(finishedAt, new Date(workout.started_at)))),
+    exercises: workout.exercises.map((e) => ({
+      slug: e.slug,
+      target_reps: e.target_reps,
+      sets: e.sets.map(cleanSet),
+    })),
+  };
+  const allSets = doc.exercises.flatMap((e) => e.sets);
+  const summary = {
+    sets_done: allSets.filter((s) => s.done).length,
+    tonnage: tonnage(allSets),
+    duration_min: Math.max(0, Math.round((finishedAt - new Date(workout.started_at)) / 60000)),
+    // this week's count (already includes finished workouts not yet synced) + this one
+    // (+1 only if the workout started in the current week)
+    week_count: (snapshot ? snapshot.week_count : 0)
+      + (mondayOf(workout.date) === mondayOf(localDate(new Date())) ? 1 : 0),
+    week_goal: snapshot ? snapshot.week_goal : 4,
+  };
+
+  // Queue first, then forget the in-progress copy (a crash in between only costs a duplicate
+  // id, and the server replaces duplicates)
+  if (!enqueue("workout", workout.id, doc)) {
+    // Phone storage full or blocked: keep the in-progress copy, lose nothing
+    await showDialog(
+      `<h2>Enregistrement impossible</h2><p class="muted">Le stockage du téléphone est plein ou bloqué. La séance reste ouverte : libère de la place puis réessaie de terminer.</p>`,
+      [{ label: "OK", value: true, className: "primary" }],
     );
-    workout = null;
-    closeWorkout();
-  } catch (error) {
-    showError(error);
+    return;
   }
+  store.remove("workout");
+  rebuildSnapshot();  // next session / last weights / week count now include this workout
+  workout = null;
+
+  const goalReached = summary.week_count === summary.week_goal;
+  await showDialog(`
+    <p class="big-emoji">${goalReached ? "🏆" : "✅"}</p>
+    <h2>${goalReached ? "Objectif de la semaine atteint !" : "Séance terminée"}</h2>
+    <dl class="recap">
+      <div><dt>Séries</dt><dd>${Number(summary.sets_done)}</dd></div>
+      <div><dt>Tonnage</dt><dd>${Math.round(summary.tonnage)} kg</dd></div>
+      <div><dt>Durée</dt><dd>${Number(summary.duration_min)} min</dd></div>
+      <div><dt>Semaine</dt><dd>${Number(summary.week_count)}/${Number(summary.week_goal)}</dd></div>
+    </dl>`,
+    [{ label: "Fermer", value: true, className: "primary" }],
+  );
+  closeWorkout();
+  syncOutbox();  // not awaited: sends it now if the PC is on
 }
 
 async function abandonWorkout() {
@@ -231,7 +323,7 @@ async function abandonWorkout() {
     [{ label: "Annuler", value: false }, { label: "Abandonner", value: true, className: "danger" }],
   );
   if (!ok) return;
-  await api(`/workouts/${workout.id}`, { method: "DELETE" });
+  store.remove("workout");  // nothing was ever sent to the server: only the phone copy goes
   workout = null;
   closeWorkout();
 }

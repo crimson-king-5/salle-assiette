@@ -6,9 +6,10 @@ before our code even runs.
 """
 
 import datetime as dt
+import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, NaiveDatetime, model_validator
 
 from app.algorithms import PlannedExercise
 
@@ -115,3 +116,52 @@ class WorkoutSummaryOut(BaseModel):
     duration_min: int
     week_count: int   # finished workouts this week, including this one
     week_goal: int
+
+
+# --- Offline sync: documents sent by the phone with PUT ---
+
+# The phone's UUID. FastAPI parses it as a real UUID (422 otherwise); routes store str(client_id),
+# which is always the lowercase hyphenated form.
+ClientId = uuid.UUID
+
+
+class SyncSetIn(BaseModel):
+    weight: float | None = Field(default=None, ge=0, le=500)
+    reps: int | None = Field(default=None, ge=0, le=100)
+    done: bool
+
+
+class SyncExerciseIn(BaseModel):
+    slug: str = Field(max_length=80)
+    target_reps: str = Field(max_length=20)
+    sets: list[SyncSetIn] = Field(max_length=10)
+
+
+class WorkoutSyncIn(BaseModel):
+    """A FINISHED workout, as logged on the phone."""
+    session_id: str = Field(max_length=20)  # may point to a template deleted since
+    name: str = Field(max_length=80)
+    focus: str = Field(max_length=20)
+    format: FormatName
+    date: dt.date
+    started_at: NaiveDatetime   # phone local time, no timezone (like the server's own clock)
+    finished_at: NaiveDatetime
+    exercises: list[SyncExerciseIn] = Field(max_length=20)
+
+    @model_validator(mode="after")
+    def clamp_finish(self):
+        # A phone clock that jumped back (DST, manual fix) must not get a real workout refused
+        if self.finished_at < self.started_at:
+            self.finished_at = self.started_at
+        return self
+
+
+class CheckinSyncIn(CheckinIn):
+    """A check-in made on the phone. The result is NOT sent: the server recomputes it."""
+    date: dt.date
+    created_at: NaiveDatetime
+
+
+class SyncOut(BaseModel):
+    id: int
+    created: bool  # False when the document was already on the server (replaced)

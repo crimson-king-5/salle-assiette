@@ -69,6 +69,8 @@ class Workout(Base):
     date: Mapped[dt.date] = mapped_column(index=True)
     started_at: Mapped[dt.datetime]
     finished_at: Mapped[dt.datetime | None]  # None while the workout is in progress
+    # UUID made by the phone (offline sync): sending the same workout twice updates this row
+    client_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True)
 
     exercises: Mapped[list["WorkoutExercise"]] = relationship(
         order_by="WorkoutExercise.position", cascade="all, delete-orphan"
@@ -107,6 +109,7 @@ class Checkin(Base):
     id: Mapped[int] = mapped_column(primary_key=True)  # 1, 2, 3… assigned by the DB
     date: Mapped[dt.date] = mapped_column(index=True)
     created_at: Mapped[dt.datetime]
+    client_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True)  # see Workout
 
     # The answers, as received
     energy: Mapped[int]
