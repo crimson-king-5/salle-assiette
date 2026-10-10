@@ -193,3 +193,29 @@ class WeightEntry(Base):
     date: Mapped[dt.date] = mapped_column(index=True)
     kg: Mapped[float]
     created_at: Mapped[dt.datetime]
+
+
+class CoachMessage(Base):
+    """One message of a coach chat thread (SPEC §7.3). Only the last 40 per thread are kept."""
+    __tablename__ = "coach_message"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread: Mapped[str] = mapped_column(String(12), index=True)  # "training" | "nutrition"
+    role: Mapped[str] = mapped_column(String(8))                 # "user" | "model"
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[dt.datetime]
+
+
+class CoachAction(Base):
+    """A change the coach made through a tool (SPEC §7.4), with what is needed to undo it."""
+    __tablename__ = "coach_action"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread: Mapped[str] = mapped_column(String(12), index=True)
+    message_id: Mapped[int | None] = mapped_column(index=True)  # the coach reply it belongs to
+    tool: Mapped[str] = mapped_column(String(40))
+    args: Mapped[str] = mapped_column(Text)      # JSON, validated arguments
+    summary: Mapped[str] = mapped_column(String(300))  # French sentence shown under the reply
+    undo: Mapped[str] = mapped_column(Text)      # JSON, tool-specific "before" state
+    status: Mapped[str] = mapped_column(String(10), default="applied")  # "applied" | "undone"
+    created_at: Mapped[dt.datetime]

@@ -286,6 +286,11 @@ async function addExerciseToDraft() {
     sets: exercise.is_cardio ? 1 : 3, reps: exercise.is_cardio ? "20" : "8-12",  // cardio: minutes
   });
   drawSession(`[data-act="ex-del"][data-i="${draft.exercises.length - 1}"]`);
+  // SPEC §7.1: offer the coach's opinion on this addition (online only, and only if the coach is on)
+  if (!offline && coachEnabled()) {
+    const { slug } = exercise, sessionId = draft.id;
+    showToast("Un avis du coach sur cet ajout ?", "Voir", () => exerciseAdviceFlow(slug, sessionId), 8000);
+  }
 }
 
 // Search dialog over the library. Returns the exercise tapped, or null.

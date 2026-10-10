@@ -48,6 +48,7 @@ function apiMessage(error, offlineText = "Connecte-toi au PC pour modifier le pr
 // What to tell when the PC is off, per action (default: the program editor's sentence)
 const OFFLINE_TEXT = {
   "edit-profile": "Connecte-toi au PC pour changer tes objectifs.",
+  "toggle-coach": "Connecte-toi au PC pour changer ce réglage.",
   export: "Connecte-toi au PC pour exporter tes données.",
 };
 
@@ -208,6 +209,16 @@ async function profileFlow() {
 }
 
 
+// --- Coach on/off (online only: PUT /profile) ---
+
+async function toggleCoach() {
+  const enable = !coachEnabled();
+  await api("/profile", { method: "PUT", strict: true, body: JSON.stringify({ coach_enabled: enable }) });
+  await refreshSnapshot();
+  showToast(enable ? "Coach activé ✓" : "Coach désactivé");
+}
+
+
 // --- Export ---
 
 async function exportData() {
@@ -264,6 +275,14 @@ function drawHome() {
       <h2 id="r-goals-title">Objectifs</h2>
       ${goals}
       <button type="button" class="wide" data-act="edit-profile">Modifier mes objectifs</button>
+    </section>
+
+    <section class="card" aria-labelledby="r-coach-title">
+      <h2 id="r-coach-title">Coach IA</h2>
+      <p class="muted">Conseils sur l'entraînement et les repas (Gemini, clé dans backend/.env). Il ne modifie rien sans ton accord, et chaque changement s'annule.</p>
+      <ul class="rows"><li><span class="jr-label">Coach</span><span class="jr-sub">${coachEnabled() ? "activé" : "désactivé"}</span></li></ul>
+      ${offline ? `<p class="muted offline-hint">📴 Connecte-toi au PC pour changer ce réglage.</p>` : ""}
+      <button type="button" class="wide" data-act="toggle-coach">${coachEnabled() ? "Désactiver le coach" : "Activer le coach"}</button>
     </section>
 
     <section class="card" aria-labelledby="r-weight-title">
@@ -330,6 +349,7 @@ function setupReglages() {
     "add-weight": () => addWeightFlow(),
     "edit-weight": (data) => editWeightFlow(data.id),
     "edit-profile": () => profileFlow(),
+    "toggle-coach": () => toggleCoach(),
     export: () => exportData(),
     rejected: () => showRejected(),
   });

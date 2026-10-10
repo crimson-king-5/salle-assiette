@@ -28,6 +28,7 @@ from app.exercises import router as exercises_router
 from app.program import router as program_router
 from app.export import router as export_router
 from app.prototype_import import router as import_router
+from app.coach import router as coach_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
@@ -95,6 +96,7 @@ app.include_router(exercises_router)
 app.include_router(program_router)
 app.include_router(export_router)
 app.include_router(import_router)
+app.include_router(coach_router)
 
 
 @app.middleware("http")

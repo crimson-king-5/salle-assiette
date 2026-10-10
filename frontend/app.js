@@ -438,6 +438,7 @@ async function start() {
   setupWorkout();
   setupAssiette();
   setupProgress();
+  setupCoach();
   setupReglages();
   setupProgramme();
   renderPending();

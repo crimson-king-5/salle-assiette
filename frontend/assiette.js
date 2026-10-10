@@ -10,7 +10,7 @@
 // --- Tabs (Aujourd'hui / Assiette …) ---
 // Each tab is a <main id=name class="tab">. Workout mode hides all of them and the tab bar.
 
-const TABS = ["today", "assiette", "progres", "reglages"];
+const TABS = ["today", "assiette", "progres", "coach", "reglages"];
 let currentTab = "today";
 
 function showTab(name) {
@@ -25,7 +25,8 @@ function showTab(name) {
   });
   store.set("tab", name);
   window.scrollTo(0, 0);
-  if (name === "assiette") renderAssiette();
+  if (name === "assiette") { renderAssiette(); renderMealCoach(); }
+  if (name === "coach") openCoachTab();
   if (name === "progres") renderProgress();
   if (name === "reglages") renderReglages();  // keeps an open sub-view (and its draft); redraws the home
 }

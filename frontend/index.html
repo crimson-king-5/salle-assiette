@@ -109,11 +109,34 @@
       <div class="fold-body" id="a-mealprep-body"></div>
     </details>
 
-    <!-- Placeholder: the AI meal coach (SPEC §4.7, §7.2) comes in a later block -->
-    <section class="card coach" aria-labelledby="a-coach-title">
-      <h2 id="a-coach-title">Coach repas — bientôt</h2>
-      <p class="muted">Bientôt, tu pourras me décrire ton repas et je te donnerai mon avis. Pas encore branché.</p>
+    <!-- Meal coach (SPEC §4.7, §7.2): online only, see coach.js -->
+    <section class="card" aria-labelledby="a-coach-title">
+      <h2 id="a-coach-title">Coach repas</h2>
+      <p class="muted">Décris ce que tu manges : avis, conseil et estimation des protéines.</p>
+      <form id="m-form" class="form">
+        <label>Ton repas<textarea id="m-text" rows="2" placeholder="ex. 2 œufs, du pain complet et un skyr"></textarea></label>
+        <p id="m-note" class="coach-note" role="status" hidden></p>
+        <button type="submit" id="m-ask" class="wide">Demander son avis</button>
+      </form>
+      <div id="m-result" class="meal-result" aria-live="polite" hidden></div>
     </section>
+  </main>
+
+  <!-- Coach screen (SPEC §7.3): two chat threads, online only (coach.js) -->
+  <main id="coach" class="tab" hidden>
+    <header>
+      <p class="date">Ton coach IA</p>
+      <h1>Coach</h1>
+    </header>
+    <div id="c-threads" class="thread-switch" role="tablist" aria-label="Fil de discussion"></div>
+    <div id="c-messages" class="chat" aria-live="polite"></div>
+    <form id="c-form" class="form chat-form">
+      <p id="c-note" class="coach-note" role="status" hidden></p>
+      <label>Ton message<textarea id="c-input" rows="2" maxlength="2000" placeholder="Écris au coach…"></textarea></label>
+      <button type="submit" id="c-send" class="primary">Envoyer</button>
+      <label class="check-row"><input type="checkbox" id="c-allow"> Le coach peut modifier mon programme et mes objectifs (avec un bouton Annuler)</label>
+    </form>
+    <button type="button" id="c-clear" class="ghost" hidden>Effacer cette conversation</button>
   </main>
 
   <!-- Progrès screen (SPEC §4.8): read-only, drawn from the cached snapshot (progres.js) -->
@@ -182,6 +205,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 20h18M6 16v-4M11 16V8M16 16v-6M21 16V5"/></svg>
         <span>Progrès</span>
       </button>
+      <button type="button" data-tab="coach">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v11H9l-5 4z"/></svg>
+        <span>Coach</span>
+      </button>
       <button type="button" data-tab="reglages">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
         <span>Réglages</span>
@@ -205,6 +232,7 @@
   <script src="workout.js"></script>
   <script src="assiette.js"></script>
   <script src="progres.js"></script>
+  <script src="coach.js"></script>
   <script src="reglages.js"></script>
   <script src="programme.js"></script>
   <script src="app.js"></script>
