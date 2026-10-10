@@ -128,6 +128,7 @@ function deleteProteinLine(id) {
 function afterJournalChange() {
   renderPending();
   renderAssiette();
+  renderToday();  // the protein bar on the Today screen
   syncOutbox();  // not awaited: sends it now if the PC is on
 }
 

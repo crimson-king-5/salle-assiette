@@ -14,7 +14,10 @@ const QUESTIONS = [
 ];
 const VALUES = ANSWER_VALUES; // what each of the 3 buttons is worth (see logic.js / algorithms.py)
 
-const LEVEL_TEXT = { vert: "🟢 Feu vert", orange: "🟠 Feu orange", rouge: "🔴 Feu rouge" };
+const LEVEL_TEXT = { vert: "Feu vert", orange: "Feu orange", rouge: "Feu rouge" };
+const FORMAT_META = { complete: "complète · 60 min", minimale: "minimale · 35 min", express: "express · 25 min" };
+const EX_SHOWN = 3;       // exercises listed on the card before the rest is folded into one "+N" row
+let exercisesOpen = false;  // the folded rows are unfolded
 
 const answers = {};       // filled as buttons are tapped: { energy: 5, sleep: 3, … }
 let todayFormat = null;   // "complete" | "minimale" | "express"
@@ -27,18 +30,8 @@ const $ = (id) => document.getElementById(id);
 
 
 
-function formatLabel(format) {
-  if (format === "complete") {
-    return "Séance complète · ≈ 60 min";
-  }
-  else if (format === "minimale") {
-    return "Version minimale · ≈ 35 min";
-  }
-  else {
-    return "Express · 25 min, l'important c'est d'y aller";
-  }
-
-}
+// Express is the "just show up" format: say it under the meta line
+const EXPRESS_NOTE = "Express : l'important, c'est d'y aller.";
 
 
 // --- Saving on the phone (localStorage can fail: private mode, blocked storage) ---
@@ -308,8 +301,36 @@ function withPending(raw) {
 function rebuildSnapshot() {
   snapshot = withPending(rawSnapshot);
   renderAssiette();  // the protein counter reads the same snapshot + queue
+  renderToday();     // the week bar and the protein bar of this screen
+  if (!$("result").hidden) redrawResult();  // next session / formats may have changed
   renderProgress();  // so do the weight curve ...
   renderReglages();  // ... and the settings screen
+}
+
+
+// --- Week progress + protein summary (read the snapshot: work offline) ---
+
+function renderToday() {
+  const hasData = Boolean(snapshot);
+  $("week").hidden = !hasData;
+  document.querySelector(".today-protein").hidden = !hasData;
+  if (!hasData) return;
+  const goal = Math.max(1, Math.min(14, Number(snapshot.week_goal) || 4));
+  const done = Math.max(0, Number(snapshot.week_count) || 0);
+  $("week-figure").textContent = `${done}/${goal}`;
+  $("week-bar").setAttribute("aria-valuemax", String(goal));
+  $("week-bar").setAttribute("aria-valuenow", String(Math.min(done, goal)));
+  $("week-bar").style.gridTemplateColumns = `repeat(${goal}, minmax(0, 1fr))`;
+  $("week-bar").innerHTML = Array.from({ length: goal }, (_, i) => `<span${i < done ? ' class="done"' : ""}></span>`).join("");
+
+  const { entries, goal: proteinGoal } = currentProtein();
+  const total = proteinTotal(entries);
+  $("t-total").textContent = String(total);
+  $("t-goal").textContent = String(proteinGoal);
+  $("t-fill").style.width = `${Math.min(100, (total / proteinGoal) * 100)}%`;
+  $("t-gauge").dataset.done = total >= proteinGoal ? "1" : "";
+  $("t-gauge").setAttribute("aria-valuemax", String(proteinGoal));
+  $("t-gauge").setAttribute("aria-valuenow", String(Math.min(total, proteinGoal)));
 }
 
 
@@ -375,12 +396,26 @@ function showCheckin() {
 
 // --- Hero card (reads everything from the snapshot: works offline) ---
 
+// Redraw the card with the same light and format, keeping the chosen session when it still exists
+function redrawResult() {
+  const keep = selectedSession;
+  showResult({ level: $("result").dataset.level, format: todayFormat });
+  if (keep && keep !== selectedSession && snapshot && snapshot.sessions.some((s) => s.id === keep)) selectSession(keep);
+}
+
 function showResult(result) {
+  if (!snapshot || snapshot.sessions.length === 0) {  // nothing to show: back to the plain screen
+    $("result").hidden = true;
+    return;
+  }
   todayFormat = result.format;
   $("result").dataset.level = result.level;
   $("level").textContent = LEVEL_TEXT[result.level];
-  $("format").textContent = formatLabel(result.format);
+  $("format-note").textContent = EXPRESS_NOTE;
+  $("format-note").hidden = result.format !== "express";
 
+  $("sessions").hidden = true;
+  $("change-session").setAttribute("aria-expanded", "false");
   $("sessions").innerHTML = snapshot.sessions
     .map((s) => `<button type="button" data-id="${esc(s.id)}">${esc(s.name)}${isStartable(s) ? "" : " · vide"}</button>`)
     .join("");
@@ -396,18 +431,34 @@ function showResult(result) {
 // A session with no exercise can't be started (old saved snapshots have no `startable`: assume yes)
 const isStartable = (session) => session.startable !== false;
 
-function selectSession(id) {
+function selectSession(id, keepFold = false) {
+  const session = snapshot.sessions.find((s) => s.id === id);
+  if (!session) {  // the session was removed by a refresh: redraw with what exists
+    showResult({ level: $("result").dataset.level, format: todayFormat });
+    return;
+  }
   selectedSession = id;
+  if (!keepFold) exercisesOpen = false;
   document.querySelectorAll("#sessions button").forEach((b) => {
     b.classList.toggle("selected", b.dataset.id === id);
   });
-  const session = snapshot.sessions.find((s) => s.id === id);
+  $("session-name").textContent = session.name;
+  $("format").textContent = [session.focus, FORMAT_META[todayFormat]].filter(Boolean).join(" · ");
   $("start").disabled = !isStartable(session);
-  $("exercises").innerHTML = isStartable(session)
-    ? session.formats[todayFormat]
-      .map((e) => `<li>${thumbHtml(e.slug, e.name, e.thumb)}<span class="name">${esc(e.name)}</span><span class="sets">${Number(e.sets)} × ${esc(e.reps)}</span></li>`)
-      .join("") + (session.formats[todayFormat].some((e) => e.thumb) ? `<li class="credit-row">${creditLine()}</li>` : "")
-    : `<li class="empty-note">Séance vide : ajoute des exercices dans Réglages</li>`;
+  if (!isStartable(session)) {
+    $("exercises").innerHTML = `<li class="empty-note">Séance vide : ajoute des exercices dans Réglages</li>`;
+    return;
+  }
+  // Tapping a name opens the exercise viewer (data-view, see exercices.js). The tail is folded into one row.
+  const list = session.formats[todayFormat];
+  const row = (e) => `<li><button type="button" class="t-ex" data-view="${esc(e.slug)}" data-name="${esc(e.name)}" aria-label="Voir l'exercice : ${esc(e.name)}">${esc(e.name)}</button>`
+    + `<span class="sets">${Number(e.sets)}×${esc(e.reps)}</span></li>`;
+  const fold = list.length > EX_SHOWN + 1 && !exercisesOpen;
+  const shown = fold ? list.slice(0, EX_SHOWN) : list;
+  const rest = list.slice(EX_SHOWN);
+  $("exercises").innerHTML = shown.map(row).join("")
+    + (fold ? `<li class="more-row"><button type="button" class="ex-more" data-more="1">`
+      + `<span class="more-names">${esc(rest.map((e) => e.name).join(", "))}</span><span class="sets">+${rest.length}</span></button></li>` : "");
 }
 
 
@@ -423,7 +474,23 @@ async function start() {
   $("redo").addEventListener("click", showCheckin);
   $("sessions").addEventListener("click", (event) => {
     const button = event.target.closest("button");
-    if (button) selectSession(button.dataset.id);
+    if (!button) return;
+    selectSession(button.dataset.id);
+    $("sessions").hidden = true;  // the choice is made: fold the chips back
+    $("change-session").setAttribute("aria-expanded", "false");
+    $("change-session").focus();
+  });
+  $("change-session").addEventListener("click", () => {
+    const open = $("sessions").hidden;
+    $("sessions").hidden = !open;
+    $("change-session").setAttribute("aria-expanded", String(open));
+  });
+  $("exercises").addEventListener("click", (event) => {
+    if (!event.target.closest("[data-more]")) return;
+    exercisesOpen = true;
+    selectSession(selectedSession, true);
+    const first = $("exercises").querySelectorAll(".t-ex")[EX_SHOWN];  // first newly revealed row
+    if (first) first.focus();
   });
   $("start").addEventListener("click", () => startWorkout(selectedSession));
   $("resume-btn").addEventListener("click", resumeWorkout);

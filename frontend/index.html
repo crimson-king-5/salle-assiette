@@ -17,14 +17,25 @@
 </head>
 <body>
   <main id="today" class="tab">
-    <header>
+    <h1 class="sr-only">Aujourd'hui</h1>
+    <div class="today-top">
       <p class="date" id="date"></p>
-      <h1>Salut Karim</h1>
-    </header>
+      <span class="date today-user">Karim</span>
+    </div>
 
     <p id="offline" class="offline" role="status" hidden></p>
     <p id="pending" class="pending" role="status" hidden></p>
     <button type="button" id="rejected" class="rejected" hidden></button>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <!-- Week progress: sessions done / weekly goal, one segment per goal session (renderToday in app.js) -->
+    <section id="week" class="week" aria-label="Séances cette semaine" hidden>
+      <div class="week-head">
+        <span class="week-figure" id="week-figure"></span>
+        <span class="week-label">séances<br>cette semaine</span>
+      </div>
+      <div class="week-bar" id="week-bar" role="progressbar" aria-label="Séances cette semaine" aria-valuemin="0" aria-valuemax="4" aria-valuenow="0"></div>
+    </section>
 
     <!-- A workout was left in progress: offer to resume it -->
     <section id="resume" class="card hero" data-level="vert" hidden>
@@ -33,7 +44,7 @@
       <button type="button" id="resume-btn" class="primary">Reprendre</button>
     </section>
 
-    <!-- Morning check-in: 4 emoji questions + available time -->
+    <!-- Morning check-in: 4 emoji questions + available time (takes the place of the badge + session) -->
     <section id="checkin" class="card" hidden>
       <h2>Check-in du jour</h2>
       <p class="muted">5 taps, et je t'adapte la séance.</p>
@@ -49,18 +60,31 @@
       <button type="button" id="submit" class="primary" disabled>Valider</button>
     </section>
 
-    <!-- Hero card: traffic light + today's session -->
+    <!-- Main card: readiness badge + next session + start -->
     <section id="result" class="card hero" hidden>
-      <p class="level" id="level"></p>
-      <h2 id="format"></h2>
-      <p class="label">Séance</p>
-      <div class="sessions" id="sessions"></div>
+      <div class="hero-top">
+        <p class="level" id="level"></p>
+        <button type="button" id="redo" class="link">Refaire le check-in</button>
+      </div>
+      <h2 id="session-name"></h2>
+      <p class="meta" id="format"></p>
+      <p class="muted format-note" id="format-note" hidden></p>
       <ol class="exercises" id="exercises"></ol>
-      <button type="button" id="start" class="primary">Commencer</button>
-      <button type="button" id="redo" class="ghost">Refaire le check-in</button>
+      <button type="button" id="change-session" class="link" aria-expanded="false" aria-controls="sessions">Changer de séance</button>
+      <div class="sessions" id="sessions" hidden></div>
+      <button type="button" id="start" class="primary">C'est parti</button>
     </section>
 
-    <p id="error" class="error" role="alert" hidden></p>
+    <!-- Protein summary: today's total vs goal (renderToday in app.js) -->
+    <section class="today-protein" aria-label="Protéines du jour">
+      <div class="today-protein-head">
+        <span class="today-protein-label">Protéines</span>
+        <span class="today-protein-figure"><strong id="t-total">0</strong><span>/<span id="t-goal">160</span> g</span></span>
+      </div>
+      <div class="gauge" id="t-gauge" role="progressbar" aria-label="Protéines du jour" aria-valuemin="0" aria-valuemax="160" aria-valuenow="0">
+        <div id="t-fill"></div>
+      </div>
+    </section>
   </main>
 
   <!-- Assiette screen (SPEC §4.7): protein counter, quick add, journal, guides -->
