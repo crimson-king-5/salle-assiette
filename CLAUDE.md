@@ -12,6 +12,9 @@ Personal workout + nutrition app. Full spec: `SPEC.md` (French).
 - Don't over-design: every step must end with something runnable and tested.
 - Decided 2026-10-10: build the whole spec. Order: offline workout/check-in → nutrition (Assiette) → progress + settings + program editor → AI coach (Anthropic API; Karim provides the key in `backend/.env`, never committed) → daily Telegram notification (Karim creates the bot via @BotFather; token + chat id in `backend/.env`).
 
+- Design (chosen 2026-10-10): direction **B "Craie & néon"** — background #0B0D0E, surface #15181A, line #2A2F33, text #F4F6F2, muted #9BA39C, lime accent #C8F031 (actions), orange #FF9F43 (protein); Barlow Condensed 800 uppercase for headings/numbers, Figtree for body; square corners, big tap targets (≥ 48 px). Mockups: scratchpad design canvas, artboards `B_*.dc.html`.
+- Prototype import is meant to be one-shot: re-importing the same file reverts edits made in the app to imported rows. The import screen must say so.
+
 ## Layout
 - `backend/` — FastAPI app (`app/`), tests (`tests/`), venv in `backend/.venv`.
 - `frontend/` — PWA (plain HTML/CSS/JS, no build step), served by FastAPI at `/app/`.
