@@ -16,6 +16,11 @@ def test_phone_app_is_served(client):
     assert "Check-in du jour" in response.text
 
 
+def test_app_files_are_always_revalidated(client):
+    # otherwise phones can keep running an old app.js after an update
+    assert client.get("/app/app.js").headers["cache-control"] == "no-cache"
+
+
 def test_root_redirects_to_phone_app(client):
     response = client.get("/", follow_redirects=False)
     assert response.headers["location"] == "/app/"

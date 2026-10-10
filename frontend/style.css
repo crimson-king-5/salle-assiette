@@ -389,3 +389,14 @@ dialog::backdrop { background: rgb(0 0 0 / 0.55); }
   font-weight: 700;
   font-size: 1.6rem;
 }
+
+
+/* Offline banner: informative, not alarming */
+.offline {
+  margin: -8px 0 16px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  color: var(--ink);
+  font-size: 0.9rem;
+}

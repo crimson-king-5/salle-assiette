@@ -116,3 +116,16 @@ def tonnage(sets: list[LoggedSet]) -> float:
         if s.done and s.weight is not None and s.reps is not None:
             total += s.weight * s.reps
     return total
+
+
+def latest_weights(history: list[tuple[str, float]]) -> dict[str, float]:
+    """Last weight used on each exercise, to prefill the next workout offline.
+
+    `history` is every validated set as (exercise slug, weight), OLDEST FIRST, e.g.
+        [("squat", 80), ("squat", 82.5), ("rowing-barre", 60)]
+    → {"squat": 82.5, "rowing-barre": 60}
+    """
+    weights = {}
+    for slug, weight in history:
+        weights[slug] = weight  # later entries overwrite earlier ones: the latest wins
+    return weights

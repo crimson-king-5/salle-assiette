@@ -4,12 +4,12 @@ Personal workout + nutrition app. Full spec: `SPEC.md` (French).
 
 ## Context
 - **Explanations to Karim in French.** Code, identifiers and code comments stay in English.
-- Learning project: Karim is a **complete beginner in programming** (not just Python). Explain from zero with everyday analogies (variable = labelled box, function = machine, object = form with fields), one idea at a time; show exact code to type when he's stuck, then explain it line by line. Let him write the key logic (algorithms, business rules).
-- He edits code in VS Code (earlier in the Claude app editor, where indentation is hard); fixing only his whitespace on request is fine. Changes often go unsaved: if the file on disk hasn't changed, tell him to save (Ctrl+S) before re-checking.
-- Frontend: PWA first (per spec). Decided 2026-09-27: finish the PWA for Phase 1, **then** build a native Android app (Kotlin + Jetpack Compose) as a learning project on the same API — Karim wants to learn Android. Health Connect (SPEC Phase 5) is the natural trigger for going native.
-- Build phase by phase (SPEC §10). **Phase 1** screens are done (Today + Workout). Current: **offline mode** — Karim won't keep the PC on 24/7, so the PWA must work with the PC off and sync later. Plan (decided 2026-09-27): 1) Tailscale HTTPS + install ✅ 2) cache program/next session/last weights on the phone 3) local-first workout with client UUID + idempotent `PUT /workouts/{id}` sync; Karim ports `tonnage` to JS 4) offline check-in; Karim ports `compute_readiness` to JS. Program editing stays online-only.
+- Karim is a beginner in programming. Since 2026-10-10 this project is **no longer a learning exercise**: Claude writes all the code (no TODO(human) hand-offs). Karim will learn on a separate project later. Keep reports short and plain.
+- **Model policy (Karim's rule):** implementation work goes to subagents on **Sonnet** (`model: "sonnet"`), one focused task per agent. **Review and security** passes go to subagents on **Opus 5.5** (`model: "opus"`). Fix what the review confirms before committing.
+- Frontend: PWA (plain HTML/CSS/JS). A native Android app (Kotlin + Compose) may come later as a separate learning project on the same API; Health Connect (SPEC Phase 5) needs native.
+- Offline: Karim won't keep the PC on 24/7, so the PWA must work with the PC off and sync later. Done: Tailscale HTTPS + install, `/snapshot` cached on the phone. Next: local-first workout (client UUID + idempotent `PUT /workouts/{id}`), offline check-in (JS port of `compute_readiness`, kept in sync with the Python one). Program editing stays online-only.
 - Hosting: the PC is the server, reached through Tailscale. `tailscale serve --bg 8001` → https://desktop-m7c8gnc.tail696942.ts.net (tailnet only, no app login needed). `start-server.ps1` = production run on 127.0.0.1:8001.
-- Don't over-design: every step must end with something runnable.
+- Don't over-design: every step must end with something runnable and tested.
 
 ## Layout
 - `backend/` — FastAPI app (`app/`), tests (`tests/`), venv in `backend/.venv`.

@@ -82,6 +82,32 @@ class SetUpdateIn(BaseModel):
     done: bool
 
 
+class SnapshotExercise(BaseModel):
+    slug: str
+    name: str
+    sets: int
+    reps: str
+    rest_seconds: int
+
+
+class SnapshotSession(BaseModel):
+    id: str
+    name: str
+    focus: str
+    formats: dict[FormatName, list[SnapshotExercise]]  # the session in each format
+
+
+class SnapshotOut(BaseModel):
+    """Everything the phone needs to work with the PC switched off."""
+    generated_at: dt.datetime
+    sessions: list[SnapshotSession]  # rotation order
+    next_session_id: str
+    last_weights: dict[str, float]   # exercise slug → last weight used
+    checkin_today: CheckinOut | None
+    week_count: int
+    week_goal: int
+
+
 class WorkoutSummaryOut(BaseModel):
     """The end-of-workout recap (SPEC §4.2 "Fin de séance")."""
     sets_done: int

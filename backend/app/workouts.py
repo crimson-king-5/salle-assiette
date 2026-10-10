@@ -21,6 +21,18 @@ router = APIRouter(prefix="/workouts", tags=["workouts"])
 WEEK_GOAL = 4  # SPEC §1; becomes a user setting with the Réglages screen
 
 
+def week_count(db: DbSession, day: dt.date) -> int:
+    """Finished workouts in the Monday→Sunday week containing `day`."""
+    monday = day - dt.timedelta(days=day.weekday())
+    return len(db.scalars(
+        select(Workout.id).where(
+            Workout.finished_at.is_not(None),
+            Workout.date >= monday,
+            Workout.date < monday + dt.timedelta(days=7),
+        )
+    ).all())
+
+
 def find_current(db: DbSession) -> Workout | None:
     """The workout in progress, if any (started, not finished)."""
     return db.scalars(
@@ -132,20 +144,12 @@ def finish_workout(workout_id: int, db: DbSession) -> WorkoutSummaryOut:
         LoggedSet(weight=s.weight, reps=s.reps, done=s.done)
         for we in workout.exercises for s in we.sets
     ]
-    monday = workout.date - dt.timedelta(days=workout.date.weekday())
-    week_count = len(db.scalars(
-        select(Workout.id).where(
-            Workout.finished_at.is_not(None),
-            Workout.date >= monday,
-            Workout.date < monday + dt.timedelta(days=7),
-        )
-    ).all())
     duration = workout.finished_at - workout.started_at
     return WorkoutSummaryOut(
         sets_done=sum(1 for s in logged if s.done),
         tonnage=tonnage(logged),
         duration_min=round(duration.total_seconds() / 60),
-        week_count=week_count,
+        week_count=week_count(db, workout.date),
         week_goal=WEEK_GOAL,
     )
 

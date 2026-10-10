@@ -1,6 +1,8 @@
 import pytest
 
-from app.algorithms import LoggedSet, PlannedExercise, apply_format, compute_readiness, tonnage
+from app.algorithms import (
+    LoggedSet, PlannedExercise, apply_format, compute_readiness, latest_weights, tonnage,
+)
 
 
 def test_great_day_with_time_is_complete():
@@ -118,3 +120,20 @@ def test_tonnage_ignores_sets_without_weight_or_reps():
 
 def test_tonnage_handles_half_kilos():
     assert tonnage([LoggedSet(22.5, 10, True)]) == 225
+
+
+# --- latest_weights (offline prefill) ---
+
+def test_latest_weights_of_no_history_is_empty():
+    assert latest_weights([]) == {}
+
+
+def test_latest_weights_keeps_one_entry_per_exercise():
+    history = [("squat", 80), ("rowing-barre", 60)]
+    assert latest_weights(history) == {"squat": 80, "rowing-barre": 60}
+
+
+def test_latest_weights_keeps_the_most_recent_weight():
+    # oldest first: the last squat (82.5) wins, even if it's not the heaviest
+    history = [("squat", 80), ("squat", 85), ("rowing-barre", 60), ("squat", 82.5)]
+    assert latest_weights(history) == {"squat": 82.5, "rowing-barre": 60}

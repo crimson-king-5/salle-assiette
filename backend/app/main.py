@@ -2,16 +2,18 @@ import datetime as dt
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.algorithms import Format, apply_format, compute_readiness
 from app.database import Base, DbSession, SessionLocal, engine
-from app.models import Checkin, SessionTemplate, Workout, to_planned
+from app.models import Checkin, SessionTemplate, to_planned
+from app.queries import next_session_id, today_checkin
 from app.schemas import CheckinIn, CheckinOut, SessionOut
 from app.seed import seed_default_program
+from app.snapshot import router as snapshot_router
 from app.workouts import router as workouts_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -29,6 +31,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Salle & Assiette", lifespan=lifespan)
 app.include_router(workouts_router)
+app.include_router(snapshot_router)
+
+
+@app.middleware("http")
+async def always_check_app_files(request: Request, call_next):
+    # Without this, the browser may reuse an old copy of app.js/index.html
+    # after an update. "no-cache" = keep a copy, but ask the server first
+    # (a cheap "304 Not Modified" when nothing changed).
+    response = await call_next(request)
+    if request.url.path.startswith("/app/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/", include_in_schema=False)
@@ -72,11 +86,7 @@ def create_checkin(checkin: CheckinIn, db: DbSession) -> CheckinOut:
 @app.get("/checkin/today")
 def get_today_checkin(db: DbSession) -> CheckinOut:
     """Today's latest check-in, used by the Today screen's hero card."""
-    row = db.scalars(
-        select(Checkin)
-        .where(Checkin.date == dt.date.today())
-        .order_by(Checkin.id.desc())
-    ).first()
+    row = today_checkin(db)
     if row is None:
         raise HTTPException(status_code=404, detail="Pas encore de check-in aujourd'hui")
     return CheckinOut(score=row.score, level=row.level, format=row.format)
@@ -95,15 +105,7 @@ def list_sessions(db: DbSession) -> list[SessionOut]:
 @app.get("/sessions/next")
 def get_next_session_id(db: DbSession) -> dict:
     """Next session of the rotation: the one after the last finished workout."""
-    rotation = db.scalars(select(SessionTemplate.id).order_by(SessionTemplate.position)).all()
-    last = db.scalars(
-        select(Workout.session_id)
-        .where(Workout.finished_at.is_not(None))
-        .order_by(Workout.finished_at.desc())
-    ).first()
-    if last not in rotation:  # no workout yet, or its session was deleted
-        return {"id": rotation[0]}
-    return {"id": rotation[(rotation.index(last) + 1) % len(rotation)]}
+    return {"id": next_session_id(db)}
 
 
 # Declared after /sessions/next, otherwise "next" would be read as a session id
