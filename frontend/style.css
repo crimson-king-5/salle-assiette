@@ -1080,6 +1080,9 @@ dialog { max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
 .pick-item { display: flex; align-items: center; gap: 10px; }
 .pick-item > button:not(.thumb) { flex: 1; min-width: 0; }
 .pick-note { text-align: left; margin: 8px 0 0; }
+.pick-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.pick-filters label { min-width: 0; }
+.pick-filters select { min-height: 52px; }
 .ex-head { display: flex; align-items: center; gap: 10px; }
 .ex-head .ex-name { flex: 1; min-width: 0; }
 .ex-count { margin: 12px 0 0; }

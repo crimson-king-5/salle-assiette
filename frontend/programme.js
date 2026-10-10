@@ -299,6 +299,8 @@ async function addExerciseToDraft() {
   }
 }
 
+const pickFilters = { muscle: "", equip: "" };  // last filters of the "Ajouter" dialog (this app session only)
+
 // Search dialog over the library. Returns the exercise tapped, or null.
 async function pickExercise() {
   const SHOWN = 40;
@@ -307,17 +309,32 @@ async function pickExercise() {
     let picked = null;
     const shown = showDialog(`
       <h2>Ajouter un exercice</h2>
-      <div class="form"><input id="xp-query" type="search" autocomplete="off" placeholder="squat, presse, butterfly, poulie…" aria-label="Chercher un exercice"></div>
+      <div class="form"><input id="xp-query" type="search" autocomplete="off" placeholder="squat, presse, butterfly, poulie…" aria-label="Chercher un exercice">
+        <div class="pick-filters">
+          <label>Muscle<select id="xp-muscle"><option value="">Tous</option>${optionList(MUSCLES, pickFilters.muscle)}</select></label>
+          <label>Matériel<select id="xp-equip"><option value="">Tous</option>${optionList(EQUIPMENTS, pickFilters.equip)}</select></label>
+        </div></div>
       <p class="muted pick-note" id="xp-note"></p>
       <ul class="results" id="xp-results"></ul>`,
       [{ label: "Fermer", value: null }, { label: "Exercice perso", value: "create" }],
     );
     const draw = () => {
       const query = $("xp-query").value;
-      // Nothing typed: Karim's own exercises (the 1 300 others are one search away)
-      const found = query.trim() ? searchLibrary(query, all) : all.filter((e) => !e.is_library);
+      const muscle = pickFilters.muscle = $("xp-muscle").value;
+      const equip = pickFilters.equip = $("xp-equip").value;
+      const filtering = query.trim() !== "" || muscle !== "" || equip !== "";
+      // Nothing typed, no filter: Karim's own exercises (the 1 300 others are one search away)
+      let found;
+      if (filtering) {
+        found = all.filter((e) => (muscle === "" || e.muscle_group === muscle) && (equip === "" || e.equipment === equip));
+        if (query.trim()) found = searchLibrary(query, found);
+      } else {
+        found = all.filter((e) => !e.is_library);
+      }
       const list = found.slice(0, SHOWN);
-      $("xp-note").textContent = query.trim() ? "" : `Tes exercices. Cherche pour trouver les ${all.length} de la bibliothèque.`;
+      $("xp-note").textContent = filtering
+        ? (found.length === 0 ? "" : `${found.length} exercice${found.length > 1 ? "s" : ""}`)
+        : `Tes exercices. Cherche pour trouver les ${all.length} de la bibliothèque.`;
       $("xp-results").innerHTML = found.length === 0
         ? `<li class="muted">Rien trouvé. Tu peux créer un exercice perso.</li>`
         : (list.some((e) => e.thumb) ? `<li class="credit-row">${creditLine()}</li>` : "")
@@ -327,6 +344,7 @@ async function pickExercise() {
     };
     const body = $("dialog-body");
     body.oninput = draw;
+    body.onchange = draw;  // selects: `input` already fires in browsers, `change` is the safety net
     body.onclick = (event) => {
       const peek = event.target.closest("button[data-peek]");
       if (peek) {  // thumbnail: the viewer, with "Choisir cet exercice"
@@ -345,6 +363,7 @@ async function pickExercise() {
     draw();
     const action = await shown;
     body.oninput = null;
+    body.onchange = null;
     body.onclick = null;
     if (action === "create") {
       await exerciseForm(null);

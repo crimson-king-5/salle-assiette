@@ -3,7 +3,7 @@
 // the PC answers, the saved copy otherwise. API calls are not touched here:
 // app.js handles them (timeout + snapshot saved on the phone).
 
-const CACHE = "salle-v15";  // bump whenever a cached file changes
+const CACHE = "salle-v16";  // bump whenever a cached file changes
 const SHELL = [
   "./", "style.css", "logic.js", "app.js", "workout.js", "assiette.js", "assiette-data.js",
   "progres.js", "coach.js", "exercices.js", "reglages.js", "programme.js",
