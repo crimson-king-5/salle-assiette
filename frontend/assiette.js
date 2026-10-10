@@ -10,7 +10,7 @@
 // --- Tabs (Aujourd'hui / Assiette …) ---
 // Each tab is a <main id=name class="tab">. Workout mode hides all of them and the tab bar.
 
-const TABS = ["today", "assiette"];
+const TABS = ["today", "assiette", "progres", "reglages"];
 let currentTab = "today";
 
 function showTab(name) {
@@ -26,6 +26,8 @@ function showTab(name) {
   store.set("tab", name);
   window.scrollTo(0, 0);
   if (name === "assiette") renderAssiette();
+  if (name === "progres") renderProgress();
+  if (name === "reglages") renderReglages();  // keeps an open sub-view (and its draft); redraws the home
 }
 
 function enterWorkoutMode() {
@@ -506,7 +508,10 @@ function setupAssiette() {
 
   $("tabbar").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-tab]");
-    if (button) showTab(button.dataset.tab);
+    if (!button) return;
+    showTab(button.dataset.tab);
+    // Progrès and Réglages read the snapshot: make sure it is fresh when the PC answers
+    if (button.dataset.tab === "progres" || button.dataset.tab === "reglages") refreshSnapshot();
   });
   $("a-shortcuts").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-i]");

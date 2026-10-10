@@ -115,6 +115,7 @@ class WeightOut(BaseModel):
     id: str            # the phone's UUID (client_id)
     date: dt.date
     kg: float
+    created_at: dt.datetime  # when it was made: the phone uses it to pick one weigh-in per day
 
 
 class RecordOut(BaseModel):

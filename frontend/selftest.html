@@ -116,6 +116,37 @@
     check("proteinFor rounds to whole grams", [proteinFor(31, 120), proteinFor(11, 140), proteinFor(0, 100)], [37, 15, 0]);
     check("cleanLabel trims, squeezes spaces, caps at 80", [cleanLabel("  a   b \n c "), cleanLabel("x".repeat(100)).length, cleanLabel(null)], ["a b c", 80, ""]);
 
+    // --- weigh-ins (weightsState / applyPending overlay) ---
+    const WRAW = { weights: [{ id: "a", date: "2026-10-01", kg: 88, created_at: "2026-10-01T08:00:00" }, { id: "b", date: "2026-10-05", kg: 87, created_at: "2026-10-05T08:00:00" }] };
+    const wput = (id, date, kg, created) => ({ type: "weight", id, body: { date, kg, created_at: created } });
+    const wdel = (id) => ({ type: "weight-delete", id, body: null });
+    const ws = (outbox, sent = [], raw = WRAW) => weightsState(raw, outbox, sent);
+    const wkg = (list) => list.map((w) => `${w.date}:${w.kg}`);
+
+    check("snapshot weigh-ins come back oldest first", wkg(ws([])), ["2026-10-01:88", "2026-10-05:87"]);
+    check("no snapshot, nothing queued", ws([], [], null), []);
+    check("old cached snapshot without weights", ws([], [], {}), []);
+    check("queued add is placed by date", wkg(ws([wput("c", "2026-10-03", 87.5, "2026-10-03T08:00:00")])), ["2026-10-01:88", "2026-10-03:87.5", "2026-10-05:87"]);
+    check("queued edit replaces the snapshot line", wkg(ws([wput("b", "2026-10-05", 86.4, "2026-10-06T09:00:00")])), ["2026-10-01:88", "2026-10-05:86.4"]);
+    check("edit that moves the date", wkg(ws([wput("b", "2026-10-07", 87, "2026-10-07T09:00:00")])), ["2026-10-01:88", "2026-10-07:87"]);
+    check("queued delete removes a line", wkg(ws([wdel("a")])), ["2026-10-05:87"]);
+    check("delete wins over a sent add of the same id", wkg(ws([wdel("c")], [wput("c", "2026-10-03", 87.5, "2026-10-03T08:00:00")])), ["2026-10-01:88", "2026-10-05:87"]);
+    check("delete wins even if the add is later in the outbox", wkg(ws([wdel("c"), wput("c", "2026-10-03", 87.5, "2026-10-03T08:00:00")])), ["2026-10-01:88", "2026-10-05:87"]);
+    check("queued add beats a snapshot line of the same day", wkg(ws([wput("c", "2026-10-05", 86.8, "2026-10-05T20:00:00")])), ["2026-10-01:88", "2026-10-05:86.8"]);
+    check("two queued weigh-ins of one day: the latest made wins",
+      wkg(ws([wput("c", "2026-10-08", 86, "2026-10-08T08:00:00"), wput("d", "2026-10-08", 85.5, "2026-10-08T21:00:00")])).slice(-1), ["2026-10-08:85.5"]);
+    check("snapshot created_at is kept", ws([])[1].created_at, "2026-10-05T08:00:00");
+    check("a queued add made BEFORE the snapshot line of that day loses", wkg(ws([wput("c", "2026-10-05", 90, "2026-10-05T07:00:00")])), ["2026-10-01:88", "2026-10-05:87"]);
+    check("a queued add made AFTER the snapshot line wins", wkg(ws([wput("c", "2026-10-05", 90, "2026-10-05T09:00:00")])), ["2026-10-01:88", "2026-10-05:90"]);
+    check("an edit (new created_at) moved onto a day wins", wkg(ws([wput("a", "2026-10-05", 88, "2026-10-10T12:00:00")])), ["2026-10-05:88"]);
+    check("snapshot line without created_at (old cache) loses to a queued one", wkg(ws([wput("c", "2026-10-05", 90, "2026-10-05T07:00:00")], [], { weights: [{ id: "b", date: "2026-10-05", kg: 87 }] })), ["2026-10-05:90"]);
+    check("outbox edit beats the sent one", ws([wput("c", "2026-10-03", 90, "2026-10-03T09:00:00")], [wput("c", "2026-10-03", 80, "2026-10-03T08:00:00")]).find((w) => w.id === "c").kg, 90);
+    check("applyPending carries the weigh-ins", wkg(applyPending({ ...RAW, ...WRAW }, [wput("c", "2026-10-09", 86, "2026-10-09T08:00:00")], [], "2026-10-10").weights).length, 3);
+    check("applyPending on an old cached snapshot (no weights)", ap([]).weights, []);
+    check("dayNumber counts days across a month end", dayNumber("2026-11-02") - dayNumber("2026-10-30"), 3);
+    check("autoProteinGoal per objective", [autoProteinGoal(86, "recompo"), autoProteinGoal(86, "muscle"), autoProteinGoal(86, "forme"), autoProteinGoal(86, "perte")], [172, 155, 138, 172]);
+    check("autoProteinGoal is clamped to 60-300", [autoProteinGoal(20, "forme"), autoProteinGoal(240, "recompo")], [60, 300]);
+
     // --- suggestPortions ---
     const names = (r) => r.items.map((p) => p.label);
     check("nothing left, nothing to suggest", suggestPortions(0), { items: [], left: 0 });

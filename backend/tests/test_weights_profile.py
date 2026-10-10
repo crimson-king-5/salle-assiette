@@ -132,3 +132,10 @@ def test_snapshot_carries_the_profile(client):
     assert (snap["objective"], snap["target_weight_kg"], snap["coach_enabled"]) == ("perte", 78, False)
     assert (snap["week_goal"], snap["protein_goal_g"]) == (3, 170)
     assert "indicatif" in snap["kcal_hint"]
+
+
+def test_snapshot_weights_carry_created_at(client, db):
+    cid = str(uuid.uuid4())
+    put_weight(client, cid=cid)
+    weights = client.get("/snapshot").json()["weights"]
+    assert weights == [{"id": cid, "date": TODAY.isoformat(), "kg": 88.4, "created_at": NOW.isoformat()}]

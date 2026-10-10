@@ -122,6 +122,7 @@ function applyPending(raw, outbox, sent, today) {
   const protein = proteinState(raw, outbox, sent, today);
   snap.protein_today = protein.entries;
   snap.protein_goal_g = protein.goal;
+  snap.weights = weightsState(raw, outbox, sent);
   return snap;
 }
 
@@ -171,6 +172,53 @@ function proteinState(raw, outbox, sent, today) {
 function proteinTotal(entries) {
   return entries.reduce((sum, e) => sum + (Number(e.grams) || 0), 0);
 }
+
+// --- Weigh-ins (SPEC §4.8) ---
+// Outbox item types: "weight" = PUT a weigh-in { date, kg, created_at } (add or correct),
+// "weight-delete" = DELETE it. Same local-first pattern as the protein journal.
+
+const MIN_KG = 30;   // KEEP IN SYNC with WeightSyncIn in backend/app/schemas.py
+const MAX_KG = 250;
+
+// The weigh-ins as the phone must show them: the snapshot's list, then every queued or just-sent
+// change on top, ONE per day (like the server: the most recently made one wins; a snapshot line
+// from an old cache may lack created_at: then a queued change beats it). Oldest first. `raw` may be null.
+function weightsState(raw, outbox, sent) {
+  const rows = new Map();  // id -> { id, date, kg, created_at }
+  for (const w of (raw && raw.weights) || []) rows.set(w.id, { id: w.id, date: w.date, kg: w.kg, created_at: w.created_at ?? "" });
+
+  const pending = [...sent, ...outbox];  // sent first: an outbox edit is newer than a sent one
+  for (const item of pending) {
+    if (item.type === "weight") rows.set(item.id, { id: item.id, ...item.body });
+  }
+  for (const item of pending) {
+    if (item.type === "weight-delete") rows.delete(item.id);  // a delete wins, whatever the order
+  }
+
+  const perDay = new Map();
+  const byMadeAt = [...rows.values()].sort((a, b) =>
+    String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id));
+  for (const w of byMadeAt) perDay.set(w.date, w);  // ascending: the last one of a day wins
+  return [...perDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// KEEP IN SYNC with PROTEIN_PER_KG / auto_protein_goal() in backend/app/algorithms.py.
+const PROTEIN_PER_KG = { recompo: 2.0, perte: 2.0, muscle: 1.8, forme: 1.6 };
+
+function autoProteinGoal(weightKg, objective) {
+  const grams = Math.floor(weightKg * (PROTEIN_PER_KG[objective] ?? 2.0) + 0.5);
+  return Math.max(60, Math.min(300, grams));
+}
+
+// "2026-10-10" -> local Date at midnight; and the number of days since 1970 (DST-proof)
+function parseDay(dateStr) {
+  const [y, m, d] = String(dateStr).slice(0, 10).split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function dayNumber(dateStr) {
+  return Math.round(parseDay(dateStr).getTime() / 86400000);
+}
+
 
 // Grams of protein in `grams` g of a food that has `per100` g of protein per 100 g. Whole grams.
 function proteinFor(per100, grams) {

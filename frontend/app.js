@@ -66,10 +66,11 @@ class OfflineError extends Error {
 
 async function api(path, options = {}) {
   // strict: a 404 is an error like any other (default: 404/204 -> null, "nothing there")
-  const { strict, ...init } = options;
-  // Give up after 5 s: when the PC is off, a request can hang for a long time.
+  // timeout: ms before giving up (default 5 s; the file import and the export need more)
+  const { strict, timeout = 5000, ...init } = options;
+  // Give up after a few seconds: when the PC is off, a request can hang for a long time.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  const timer = setTimeout(() => controller.abort(), timeout);
   let response;
   try {
     response = await fetch(path, {
@@ -87,6 +88,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(`Erreur serveur (${response.status})`);
     error.status = response.status;
+    try { error.detail = (await response.json()).detail; } catch { /* no JSON body */ }  // FastAPI's explanation
     throw error;
   }
   return response.json();
@@ -124,6 +126,19 @@ async function loadSnapshot() {
   }
 }
 
+// Re-read the snapshot (tab switch, after an edit in Réglages). Offline: keep the saved copy.
+async function refreshSnapshot() {
+  try {
+    await fetchSnapshot();
+  } catch (error) {
+    if (!(error instanceof OfflineError)) return;  // a server hiccup: keep what we have
+    offline = true;
+  }
+  rebuildSnapshot();
+  renderBanner();
+  if (!offline) syncOutbox();
+}
+
 function renderBanner() {
   $("offline").hidden = !offline;
   if (offline && snapshot) {
@@ -138,6 +153,7 @@ function renderBanner() {
 // --- Outbox: finished workouts and check-ins waiting to reach the server ---
 // Each item: { type, id: <uuid>, body: <document for the PUT> } with type one of
 //   "workout" | "checkin" | "protein" (PUT a journal line) | "protein-delete" (DELETE it, body null)
+//   | "weight" (PUT a weigh-in) | "weight-delete" (DELETE it, body null)
 // Three lists in localStorage:
 //   outbox   -> not sent yet (shown as "en attente de synchro", overlaid on the snapshot)
 //   sent     -> accepted by the server (2xx) but not yet inside a snapshot we hold; still overlaid
@@ -163,7 +179,7 @@ function enqueue(type, id, body) {
 
 function renderPending() {
   const n = getOutbox().length;
-  for (const id of ["pending", "a-pending"]) {  // Today and Assiette each show it
+  for (const id of ["pending", "a-pending", "p-pending", "r-pending"]) {  // every tab shows it
     $(id).hidden = n === 0;
     $(id).textContent = `☁️ ${n} élément${n > 1 ? "s" : ""} en attente de synchro`;
   }
@@ -178,6 +194,8 @@ function describeItem(item) {
   if (item.type === "workout") return `Séance ${b.name ?? ""} du ${b.date ?? "?"}`;
   if (item.type === "protein") return `Protéines : ${b.label ?? "?"} (${Number(b.grams) || 0} g)`;
   if (item.type === "protein-delete") return "Suppression d'une ligne de protéines";
+  if (item.type === "weight") return `Pesée du ${b.date ?? "?"} (${Number(b.kg) || 0} kg)`;
+  if (item.type === "weight-delete") return "Suppression d'une pesée";
   return `Check-in du ${b.date ?? "?"}`;
 }
 
@@ -216,6 +234,8 @@ const SYNC_ROUTES = {
   checkin: ["PUT", "checkins"],
   protein: ["PUT", "protein"],
   "protein-delete": ["DELETE", "protein"],
+  weight: ["PUT", "weights"],
+  "weight-delete": ["DELETE", "weights"],
 };
 
 function moveItem(item, toKey, extra) {
@@ -287,6 +307,8 @@ function withPending(raw) {
 function rebuildSnapshot() {
   snapshot = withPending(rawSnapshot);
   renderAssiette();  // the protein counter reads the same snapshot + queue
+  renderProgress();  // so do the weight curve ...
+  renderReglages();  // ... and the settings screen
 }
 
 
@@ -359,13 +381,19 @@ function showResult(result) {
   $("format").textContent = formatLabel(result.format);
 
   $("sessions").innerHTML = snapshot.sessions
-    .map((s) => `<button type="button" data-id="${esc(s.id)}">${esc(s.name)}</button>`)
+    .map((s) => `<button type="button" data-id="${esc(s.id)}">${esc(s.name)}${isStartable(s) ? "" : " · vide"}</button>`)
     .join("");
 
   $("checkin").hidden = true;
   $("result").hidden = false;
-  selectSession(snapshot.next_session_id);  // the one after the last workout done
+  // The one after the last workout done, unless it is empty: then the first one that can be started
+  const next = snapshot.sessions.find((s) => s.id === snapshot.next_session_id);
+  const fallback = snapshot.sessions.find(isStartable) || snapshot.sessions[0];
+  selectSession((next && isStartable(next) ? next : fallback).id);
 }
+
+// A session with no exercise can't be started (old saved snapshots have no `startable`: assume yes)
+const isStartable = (session) => session.startable !== false;
 
 function selectSession(id) {
   selectedSession = id;
@@ -373,9 +401,12 @@ function selectSession(id) {
     b.classList.toggle("selected", b.dataset.id === id);
   });
   const session = snapshot.sessions.find((s) => s.id === id);
-  $("exercises").innerHTML = session.formats[todayFormat]
-    .map((e) => `<li><span class="name">${esc(e.name)}</span><span class="sets">${Number(e.sets)} × ${esc(e.reps)}</span></li>`)
-    .join("");
+  $("start").disabled = !isStartable(session);
+  $("exercises").innerHTML = isStartable(session)
+    ? session.formats[todayFormat]
+      .map((e) => `<li><span class="name">${esc(e.name)}</span><span class="sets">${Number(e.sets)} × ${esc(e.reps)}</span></li>`)
+      .join("")
+    : `<li class="empty-note">Séance vide : ajoute des exercices dans Réglages</li>`;
 }
 
 
@@ -406,6 +437,9 @@ async function start() {
   });
   setupWorkout();
   setupAssiette();
+  setupProgress();
+  setupReglages();
+  setupProgramme();
   renderPending();
   await showToday();
 }

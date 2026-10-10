@@ -80,6 +80,11 @@ function loadLocalWorkout() {
 function startWorkout(sessionId) {
   const session = snapshot && snapshot.sessions.find((s) => s.id === sessionId);
   const planned = session && session.formats[todayFormat];
+  if (session && !isStartable(session)) {
+    $("error").textContent = "Séance vide : ajoute des exercices dans Réglages.";
+    $("error").hidden = false;
+    return;
+  }
   if (!planned) {
     showError(new Error("Séance introuvable sur ce téléphone"));
     return;

@@ -69,7 +69,7 @@ def get_snapshot(db: DbSession) -> SnapshotOut:
         coach_enabled=profile.coach_enabled,
         kcal_hint=KCAL_HINTS.get(profile.objective, ""),
         weights=[
-            WeightOut(id=w.client_id, date=w.date, kg=w.kg)
+            WeightOut(id=w.client_id, date=w.date, kg=w.kg, created_at=w.created_at)
             for w in weights_since(db, today - dt.timedelta(days=WEIGHT_DAYS))
         ],
         progress=build_progress(db, today, profile.sessions_goal),
